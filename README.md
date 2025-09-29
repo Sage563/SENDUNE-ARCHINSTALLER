@@ -40,6 +40,8 @@ It ships with a curated set of packages, preconfigured dotfiles, and automation 
 
 ---
 
+Fork of https://github.com/archlinux/archinstall
+
 ## 🚀 Installation
 
 ### On Linux
@@ -47,3 +49,4 @@ It ships with a curated set of packages, preconfigured dotfiles, and automation 
 git clone https://github.com/Sage564/SENDUNE-ARCHINSTALLER.git
 cd SENDUNE
 sudo python3 installer.py
+
