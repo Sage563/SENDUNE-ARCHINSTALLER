@@ -44,6 +44,6 @@ It ships with a curated set of packages, preconfigured dotfiles, and automation 
 
 ### On Linux
 ```bash
-git clone https://github.com/yourusername/SENDUNE.git
+git clone https://github.com/Sage564/SENDUNE-ARCHINSTALLER.git
 cd SENDUNE
 sudo python3 installer.py
