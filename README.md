@@ -1,6 +1,4 @@
-# 🌐 SENDUNE Linux (Updated)
-
-This repository contains the SENDUNE installer and helper scripts. See `README.md` for the original project description; this file highlights the new feature-updater and test instructions added during development.
+# 🌐 SENDUNE Linux
 
 ## 🔁 Feature updater (auto-updates from GitHub)
 
@@ -18,15 +16,6 @@ Files installed by the installer:
 
 Security note: the updater runs installer code as root by default. Only point it at trusted repositories. Consider adding GPG/SHA verification or running the installer with reduced privileges.
 
-## 🧪 Test feature repo (included)
-
-For development and testing there's a `test_feature_repo/` in this workspace with a minimal example:
-
-- `test_feature_repo/install_features.py` - example Python installer that reads `manifest.json` and applies features in an idempotent way.
-- `test_feature_repo/manifest.json` - example manifest listing packages, files and scripts.
-- `test_feature_repo/features/add-widgets.sh` - a small feature script (creates a marker file under `/tmp` for testing).
-- `test_feature_repo/files/etc/sample.conf` - an example file copied by the installer.
-- `scripts/package_test_repo.sh` - helper to create a tar.gz archive that mimics GitHub's auto-generated archive layout.
 
 ### Quick local test
 
