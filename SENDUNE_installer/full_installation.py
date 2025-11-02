@@ -16,6 +16,8 @@ from isntaller_functions import (
     interactive_services,
     interactive_timezone,
     interactive_wifi,
+    install_feature_updater
+    
 )
 from archinstall.lib.installer import Installer
 from archinstall.lib.args import arch_config_handler
@@ -117,10 +119,10 @@ def full_installation(installer: Installer, log: LogFile):
     log.info("Base Linux system installed.")
 
     interactive_add_users(installer, log)
+    interactive_wifi(installer, log)
     interactive_packages(installer, log)
     interactive_services(installer, log)
     interactive_timezone(installer, log)
-    interactive_wifi(installer, log)
     interactive_bootloader(installer, log)
     grub_file = installer.mount_point / "etc" / "default" / "grub"
     with grub_file.open("a") as f:
@@ -133,7 +135,8 @@ def full_installation(installer: Installer, log: LogFile):
     if kernel_path.exists():
         log.info("Linux kernel successfully installed.")
     else:
-        log.error("Linux kernel missing! Installation may have failed.")
+        log.error("Linux kernel missing! Installation may have failed.Re install on disk \ format")
+        print("Linux kernel missing! Installation may have failed.Re install on disk \ format")
 
     for svc in ["NetworkManager", "sshd", "bluetooth", "pipewire"]:
         installer.enable_service([svc])
@@ -144,8 +147,10 @@ def full_installation(installer: Installer, log: LogFile):
     PRETTY_NAME="SENDUNE Linux"
     ID=sendune
     ID_LIKE=arch
-    BUILD_ID=2025
+    BUILD_ID=2.0.25
     """)
+    install_feature_updater(installer, log ,repo_url= "https://github.com/Sage563/updater-theme-sendune-installer" ,branch="main")
+    
 
 
 
