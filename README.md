@@ -50,7 +50,7 @@ Check logs and artifacts:
 
 ## 🔐 Security & best practices
 
-- Verify archives before executing (GPG or SHA256). I can add example verification to the updater script if you want.
+- Verify archives before executing (GPG or SHA256).
 - Prefer running untrusted or third-party installers with reduced privileges and only escalate operations that require root via careful sudo rules.
 - Log activity and rotate logs with `logrotate` or similar.
-w
+- ![MADEWITH PYTHON](https://user-images.githubusercontent.com/74038190/212257472-08e52665-c503-4bd9-aa20-f5a4dae769b5.gif)
