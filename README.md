@@ -16,25 +16,6 @@ Files installed by the installer:
 
 Security note: the updater runs installer code as root by default. Only point it at trusted repositories. Consider adding GPG/SHA verification or running the installer with reduced privileges.
 
-
-### Quick local test
-
-1. Package the test repo into a tarball that mimics GitHub:
-
-```bash
-chmod +x scripts/package_test_repo.sh
-./scripts/package_test_repo.sh
-# creates /tmp/narchs-features-main.tar.gz
-```
-
-2. Run the example installer directly (safe to run as non-root; it will skip package installs when not root):
-
-```bash
-python3 test_feature_repo/install_features.py
-```
-
-3. Rerun the installer to verify idempotency — the second run should skip already-applied items.
-
 4. To fully simulate the updater script, point the installed `/usr/local/bin/narchs_feature_updater.sh` to the archive (or replace `ARCHIVE_URL` with the local `/tmp` file) and run it as root:
 
 ```bash
@@ -54,3 +35,12 @@ Check logs and artifacts:
 - Prefer running untrusted or third-party installers with reduced privileges and only escalate operations that require root via careful sudo rules.
 - Log activity and rotate logs with `logrotate` or similar.
 - ![MADEWITH PYTHON](https://user-images.githubusercontent.com/74038190/212257472-08e52665-c503-4bd9-aa20-f5a4dae769b5.gif)
+
+
+## Making the iso
+Use `curl https://geo.mirror.pkgbuild.com/iso/latest/archlinux-x86_64.iso >> archlinux-2024.08.01-x86_64.iso  ` to install iso(ARCH)
+Then run `chmod +x build_arch_iso.sh`
+Then run `./build_arch_iso.sh archlinux-2024.08.01-x86_64.iso ./SENDUNE_installer ./SENDUNE_Arch.iso`
+Boot up, run `cd /archinstall` , then `python3 -m SENDUNE_installer`
+
+
