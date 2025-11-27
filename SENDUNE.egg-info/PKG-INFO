@@ -1,0 +1,88 @@
+Metadata-Version: 2.4
+Name: SENDUNE
+Version: 3.0.11
+Summary: Arch Linux installer - guided, templates etc.
+Author-email: Anton Hvornum <anton@hvornum.se>
+License-Expression: GPL-3.0-only
+Project-URL: Home, https://archlinux.org
+Project-URL: Documentation, https://archinstall.readthedocs.io/
+Project-URL: Source, https://github.com/archlinux/archinstall
+Keywords: linux,arch,archinstall,installer
+Classifier: Programming Language :: Python :: 3.12
+Classifier: Operating System :: POSIX :: Linux
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+License-File: LICENSE
+Requires-Dist: pyparted>=3.13.0
+Requires-Dist: pydantic==2.11.9
+Requires-Dist: cryptography>=45.0.7
+Provides-Extra: log
+Requires-Dist: systemd_python==235; extra == "log"
+Provides-Extra: dev
+Requires-Dist: mypy==1.18.2; extra == "dev"
+Requires-Dist: flake8==7.3.0; extra == "dev"
+Requires-Dist: pre-commit==4.3.0; extra == "dev"
+Requires-Dist: ruff==0.13.1; extra == "dev"
+Requires-Dist: pylint==3.3.8; extra == "dev"
+Requires-Dist: pylint-pydantic==0.3.5; extra == "dev"
+Requires-Dist: pytest==8.4.2; extra == "dev"
+Provides-Extra: doc
+Requires-Dist: sphinx; extra == "doc"
+Dynamic: license-file
+
+# 🌐 SENDUNE Linux
+
+## 🔁 Feature updater (auto-updates from GitHub)
+
+This project includes an optional "feature updater" that the installer can deploy. The updater:
+
+- Downloads a tar.gz archive of a configured GitHub repository (or branch).
+- Extracts it and runs a small installer (for example `install_features.py`) from the repo.
+- Is installed as a systemd oneshot service plus a systemd timer so it runs shortly after boot and then periodically (daily).
+
+Files installed by the installer:
+
+- `/usr/local/bin/narchs_feature_updater.sh` - shell script that downloads, extracts and runs the repo installer.
+- `/etc/systemd/system/narchs-feature-updater.service` - oneshot systemd unit that runs the script.
+- `/etc/systemd/system/narchs-feature-updater.timer` - systemd timer to run the updater regularly.
+
+Security note: the updater runs installer code as root by default. Only point it at trusted repositories. Consider adding GPG/SHA verification or running the installer with reduced privileges.
+
+
+### Quick local test
+
+1. Package the test repo into a tarball that mimics GitHub:
+
+```bash
+chmod +x scripts/package_test_repo.sh
+./scripts/package_test_repo.sh
+# creates /tmp/narchs-features-main.tar.gz
+```
+
+2. Run the example installer directly (safe to run as non-root; it will skip package installs when not root):
+
+```bash
+python3 test_feature_repo/install_features.py
+```
+
+3. Rerun the installer to verify idempotency — the second run should skip already-applied items.
+
+4. To fully simulate the updater script, point the installed `/usr/local/bin/narchs_feature_updater.sh` to the archive (or replace `ARCHIVE_URL` with the local `/tmp` file) and run it as root:
+
+```bash
+sudo /usr/local/bin/narchs_feature_updater.sh
+```
+
+Check logs and artifacts:
+
+- `/tmp/narchs-feature-installer.log` — installer log in the test example
+- `/tmp/narchs-features/add-widgets.txt` — marker written by the test feature script
+- `/tmp/narchs-sample.conf` — sample configuration copied by the test manifest
+- `/tmp/narchs_features_installed.json` (non-root) or `/var/lib/narchs/features_installed.json` (root) — records what was applied
+
+## 🔐 Security & best practices
+
+- Verify archives before executing (GPG or SHA256).
+- Prefer running untrusted or third-party installers with reduced privileges and only escalate operations that require root via careful sudo rules.
+- Log activity and rotate logs with `logrotate` or similar.
+- ![MADEWITH PYTHON](https://user-images.githubusercontent.com/74038190/212257472-08e52665-c503-4bd9-aa20-f5a4dae769b5.gif)
