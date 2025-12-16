@@ -42,7 +42,9 @@ dev = [
 doc = ["sphinx"]
 
 [project.scripts]
-archinstall = "archinstall:run_as_a_module"
+# archinstall script removed to avoid exposing the upstream `archinstall` CLI
+# when this package is installed. The SENDUNE installer should be invoked via
+# the provided console scripts (`Senduneinstaller` / `senduneinstaller`).
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.rst", "USAGE.rst"]}

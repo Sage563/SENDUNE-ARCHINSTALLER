@@ -3,9 +3,9 @@ import sys
 import os
 import time
 from pathlib import Path
-from narchs_logos import RGB3DLogo, input_with_pause
-from custom_classes import LogFile
-from isntaller_functions import (
+from .narchs_logos import RGB3DLogo, input_with_pause
+from .custom_classes import LogFile
+from .isntaller_functions import (
     interactive_add_users,
     interactive_bootloader,
     interactive_custom_commands,
@@ -19,8 +19,12 @@ from isntaller_functions import (
     install_feature_updater
     
 )
-from archinstall.lib.installer import Installer
-from archinstall.lib.args import arch_config_handler
+try:
+    from archinstall.lib.installer import Installer
+    from archinstall.lib.args import arch_config_handler
+except Exception:
+    Installer = None
+    arch_config_handler = None
 
 # =========================
 # Configs
@@ -76,8 +80,15 @@ def logo_start():
 # Mount point
 # =========================
 def get_mount_point() -> Path:
-    disk_config = arch_config_handler.config.disk_config
-    if disk_config and disk_config.mountpoint:
+    disk_config = None
+    if 'arch_config_handler' in globals() and arch_config_handler:
+        try:
+            disk_config = getattr(arch_config_handler, 'config', None)
+            if disk_config:
+                disk_config = getattr(disk_config, 'disk_config', None)
+        except Exception:
+            disk_config = None
+    if disk_config and getattr(disk_config, 'mountpoint', None):
         return Path(disk_config.mountpoint)
     user_input = input("Enter mount point for installation (default /mnt): ").strip() or "/mnt"
     mountpoint = Path(user_input)
@@ -135,8 +146,8 @@ def full_installation(installer: Installer, log: LogFile):
     if kernel_path.exists():
         log.info("Linux kernel successfully installed.")
     else:
-        log.error("Linux kernel missing! Installation may have failed.Re install on disk \ format")
-        print("Linux kernel missing! Installation may have failed.Re install on disk \ format")
+        log.error("Linux kernel missing! Installation may have failed. Re-install on disk/format and try again.")
+        print("Linux kernel missing! Installation may have failed. Re-install on disk/format and try again.")
 
     for svc in ["NetworkManager", "sshd", "bluetooth", "pipewire"]:
         installer.enable_service([svc])
@@ -170,6 +181,8 @@ def starting_Sendune() -> None:
     log.info("Installer started.")
 
     try:
+        if Installer is None:
+            raise RuntimeError("archinstall package not available. Install with: pacman -Sy archinstall")
         installer = define_installer(mount_point, log)
         full_installation(installer, log)
     except Exception as e:

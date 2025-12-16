@@ -1,22 +1,45 @@
 import os
 from pathlib import Path
-from custom_classes import LogFile
-from archinstall import SysInfo
-from archinstall.lib.applications.application_handler import application_handler
-from archinstall.lib.args import arch_config_handler
-from archinstall.lib.authentication.authentication_handler import auth_handler
-from archinstall.lib.configuration import ConfigurationOutput
-from archinstall.lib.disk.filesystem import FilesystemHandler
-from archinstall.lib.installer import Installer, accessibility_tools_in_use, run_custom_user_commands
-from archinstall.lib.models import Bootloader
-from archinstall.lib.models.users import User
-from archinstall.lib.output import debug, error, info
-from archinstall.lib.packages.packages import check_package_upgrade
-from archinstall.lib.profile.profiles_handler import profile_handler
-from archinstall.tui import Tui
-from archinstall.lib.models.device import DiskLayoutType, EncryptionType
-from archinstall.lib.disk.utils import disk_layouts
-from archinstall.lib.interactions.general_conf import PostInstallationAction, ask_post_installation
+from .custom_classes import LogFile
+
+# Try to import archinstall; if it's not available provide a helpful
+# error path so the user knows to install the package (or build the ISO
+# with archinstall included).
+ARCHINSTALL_AVAILABLE = True
+try:
+    from archinstall.lib.applications.application_handler import application_handler
+    from archinstall.lib.args import arch_config_handler
+    from archinstall.lib.authentication.authentication_handler import auth_handler
+    from archinstall.lib.configuration import ConfigurationOutput
+    from archinstall.lib.disk.filesystem import FilesystemHandler
+    from archinstall.lib.installer import Installer, accessibility_tools_in_use, run_custom_user_commands
+    from archinstall.lib.models import Bootloader
+    from archinstall.lib.models.users import User
+    from archinstall.lib.output import debug, error, info
+    from archinstall.lib.packages.packages import check_package_upgrade
+    from archinstall.lib.profile.profiles_handler import profile_handler
+    from archinstall.lib.models.device import DiskLayoutType, EncryptionType
+    from archinstall.lib.disk.utils import disk_layouts
+    from archinstall.lib.interactions.general_conf import PostInstallationAction, ask_post_installation
+except Exception:
+    ARCHINSTALL_AVAILABLE = False
+    class User:
+        def __init__(self, username, password, is_admin=False):
+            self.username = username
+            self.password = password
+            self.is_admin = is_admin
+
+
+def ensure_archinstall_available(log: LogFile = None):
+    if not ARCHINSTALL_AVAILABLE:
+        msg = (
+            "archinstall package not available. Install it before running the installer.\n"
+            "On an installed Arch system run: `sudo pacman -Sy archinstall`\n"
+            "Or build the ISO with archinstall included so the live environment has it."
+        )
+        if log:
+            log.error(msg)
+        raise RuntimeError(msg)
 
 # ===============================
 # NARCHS Full Configuration
@@ -43,7 +66,7 @@ CUSTOM_COMMANDS = ['/usr/local/bin/narchs-setup.sh', '/usr/local/bin/narchs-dotf
 # ===========================
 # Interactive Step Menus
 # ===========================
-def interactive_disk_format(installer: Installer, log: LogFile):
+def interactive_disk_format(installer: 'Installer', log: LogFile):
     print("\n=== Disk Formatting ===")
     choice = input("Do you want to format all partitions? (y/n): ").lower()
     if choice == 'y':
@@ -64,6 +87,9 @@ def add_user(installer, log: LogFile):
     is_admin = input("Should this user have sudo/admin rights? (y/n): ").lower() == 'y'
 
     if username and password:
+        if not ARCHINSTALL_AVAILABLE:
+            log.error("Cannot create user: archinstall not available.")
+            raise RuntimeError("archinstall not available")
         new_user = User(username, password, is_admin)
         installer.create_users([new_user])  # Add this user
         print(f"User '{username}' added successfully.")
@@ -72,10 +98,13 @@ def add_user(installer, log: LogFile):
         print("Invalid username or password. Skipping.")
         log.warn("User creation skipped due to invalid input.")
 
-def interactive_add_users(installer : Installer, log: LogFile):
+def interactive_add_users(installer : 'Installer', log: LogFile):
 
     rootusers = input("Make defualt users(y)  / or make your own users(n) (y / n)")
     if rootusers == "y":
+        if not ARCHINSTALL_AVAILABLE:
+            log.error("Cannot add default users: archinstall not available.")
+            raise RuntimeError("archinstall not available")
         users = DEFAULT_USER
         installer.create_users(users)
         print("Defualt Users Installed")
@@ -86,10 +115,13 @@ def interactive_add_users(installer : Installer, log: LogFile):
         if cont != 'y':
             break
 
-def interactive_packages(installer: Installer, log: LogFile):
+def interactive_packages(installer: 'Installer', log: LogFile):
     print("\n=== Package Installation ===")
     choice = input("Install base packages (b), desktop packages (d), or both (a)? [b/d/a]: ").lower()
     if choice in ['b','a']:
+        if not ARCHINSTALL_AVAILABLE:
+            log.error("Cannot install packages: archinstall not available.")
+            raise RuntimeError("archinstall not available")
         installer.add_additional_packages(BASE_PACKAGES)
         log.info("Base packages installed.")
     if choice in ['d','a']:
@@ -97,7 +129,7 @@ def interactive_packages(installer: Installer, log: LogFile):
         log.info("Desktop packages installed.")
     input("Press Enter to continue...")
 
-def interactive_services(installer: Installer, log: LogFile):
+def interactive_services(installer: 'Installer', log: LogFile):
     print("\n=== Services Setup ===")
     for svc in DEFAULT_SERVICES:
         enable = input(f"Enable service {svc}? (y/n): ").lower()
@@ -108,7 +140,7 @@ def interactive_services(installer: Installer, log: LogFile):
             log.info(f"Service skipped: {svc}")
     input("Press Enter to continue...")
 
-def interactive_timezone(installer: Installer, log: LogFile):
+def interactive_timezone(installer: 'Installer', log: LogFile):
     tz = input("Set timezone (default America/New_York): ").strip()
     if not tz:
         tz = "America/New_York"
@@ -118,7 +150,7 @@ def interactive_timezone(installer: Installer, log: LogFile):
     log.info(f"Timezone set to {tz}")
     input("Press Enter to continue...")
 
-def interactive_wifi(installer: Installer, log: LogFile):
+def interactive_wifi(installer: 'Installer', log: LogFile):
     os.system("nmcli radio wifi on")
     networks = [n for n in os.popen("nmcli -t -f SSID dev wifi list").read().splitlines() if n]
     if networks:
@@ -146,7 +178,7 @@ def interactive_wifi(installer: Installer, log: LogFile):
         print("WIFI REQUIRED , REBOOT TO TAKE EFFECT if not no wifi, no LINUX KERNEL")
     input("Press Enter to continue...")
 
-def interactive_bootloader(installer: Installer, log: LogFile):
+def interactive_bootloader(installer: 'Installer', log: LogFile):
     print("\n=== Bootloader Setup ===")
     bootloaders = ["Grub", "SystemdBoot", "Skip"]
     for i, b in enumerate(bootloaders,1):
@@ -168,7 +200,7 @@ def interactive_bootloader(installer: Installer, log: LogFile):
         log.error("Bootloader setup failed or skipped.")
     input("Press Enter to continue...")
 
-def interactive_custom_commands(installer: Installer, log: LogFile):
+def interactive_custom_commands(installer: 'Installer', log: LogFile):
     print("\n=== Run Custom NARCHS Scripts ===")
     for cmd in CUSTOM_COMMANDS:
         run = input(f"Run {cmd}? (y/n): ").lower()
@@ -179,7 +211,7 @@ def interactive_custom_commands(installer: Installer, log: LogFile):
             log.info(f"Skipped custom command: {cmd}")
     input("Press Enter to continue...")
 
-def interactive_format_partition(installer: Installer, log: LogFile):
+def interactive_format_partition(installer: 'Installer', log: LogFile):
     print("\n=== Format Partition ===")
     disk_config = installer.disk_config
     if not disk_config or not hasattr(disk_config, 'partitions') or not disk_config.partitions:
@@ -215,7 +247,7 @@ def interactive_format_partition(installer: Installer, log: LogFile):
         log.error("Invalid input for partition formatting.")
     input("Press Enter to continue...")
 
-def interactive_find_mirrors(installer: Installer, log: LogFile):
+def interactive_find_mirrors(installer: 'Installer', log: LogFile):
     print("\n=== Find Fastest Mirrors ===")
     choice = input("Do you want to search for the fastest mirrors? (y/n): ").lower()
     if choice != 'y':
@@ -232,13 +264,16 @@ def interactive_find_mirrors(installer: Installer, log: LogFile):
         log.error(f"Failed to update mirrors: {e}")
     input("Press Enter to continue...")
 
-def setup_login_ui(installer: Installer, log: LogFile):
+def setup_login_ui(installer: 'Installer', log: LogFile):
     """Install and enable a GTK-based login UI (LightDM + GTK greeter).
 
     This will install the required packages and enable the LightDM service.
     """
     log.info("Installing LightDM and GTK greeter (lightdm + lightdm-gtk-greeter)")
     try:
+        if not ARCHINSTALL_AVAILABLE:
+            log.error("Cannot setup LightDM: archinstall not available.")
+            raise RuntimeError("archinstall not available")
         installer.add_additional_packages(['lightdm', 'lightdm-gtk-greeter'])
         # enable the service (installer API in this project expects a list)
         installer.enable_service(['lightdm'])
@@ -247,7 +282,7 @@ def setup_login_ui(installer: Installer, log: LogFile):
         log.error(f"Failed to install/enable LightDM: {e}")
         raise
 
-def install_feature_updater(installer: Installer, log: LogFile, repo_url: str, branch: str = 'main'):
+def install_feature_updater(installer: 'Installer', log: LogFile, repo_url: str, branch: str = 'main'):
     """Install a startup updater that fetches latest feature archive from GitHub.
 
     repo_url should be the HTTPS GitHub repo root, e.g.

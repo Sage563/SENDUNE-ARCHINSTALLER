@@ -7,9 +7,8 @@ setup(
     entry_points={
         "console_scripts": [
             "SENDUNE_INSTALLER = SENDUNE_installer.full_installation:starting_Sendune",
+            "Senduneinstaller = SENDUNE_installer.full_installation:starting_Sendune",
+            "senduneinstaller = SENDUNE_installer.full_installation:starting_Sendune",
         ],
-    },
-    install_requires=[
-        "archinstall",
-    ],
+    }
 )

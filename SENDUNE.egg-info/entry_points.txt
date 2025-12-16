@@ -1,2 +1,0 @@
-[console_scripts]
-SENDUNE_installer = python3 -m SENDUNE_installer
