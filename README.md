@@ -8,12 +8,6 @@ This project includes an optional "feature updater" that the installer can deplo
 - Extracts it and runs a small installer (for example `install_features.py`) from the repo.
 - Is installed as a systemd oneshot service plus a systemd timer so it runs shortly after boot and then periodically (daily).
 
-Files installed by the installer:
-
-- `/usr/local/bin/narchs_feature_updater.sh` - shell script that downloads, extracts and runs the repo installer.
-- `/etc/systemd/system/narchs-feature-updater.service` - oneshot systemd unit that runs the script.
-- `/etc/systemd/system/narchs-feature-updater.timer` - systemd timer to run the updater regularly.
-
 Security note: the updater runs installer code as root by default. Only point it at trusted repositories. Consider adding GPG/SHA verification or running the installer with reduced privileges.
 
 4. To fully simulate the updater script, point the installed `/usr/local/bin/narchs_feature_updater.sh` to the archive (or replace `ARCHIVE_URL` with the local `/tmp` file) and run it as root:
