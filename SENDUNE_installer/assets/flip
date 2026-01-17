@@ -1,0 +1,75 @@
+#!/bin/bash
+# 'flip' - Sendune's cool package manager wrapper (pacman wrapper)
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+function show_help() {
+    echo -e "${BLUE}SENDUNE flip${NC} - Package Management made easy"
+    echo "Usage: flip [command] [package_name]"
+    echo ""
+    echo "Commands:"
+    echo "  install <pkg>   Install package(s)"
+    echo "  yeet <pkg>      Remove package(s) and unused dependencies"
+    echo "  update          Update system (sync repositories and upgrade)"
+    echo "  search <query>  Search for a package"
+    echo "  info <pkg>      Show information about a package"
+    echo "  list            List all installed packages"
+    echo "  autoremove      Remove orphaned packages"
+    echo "  clean           Clean up cache and orphans"
+    echo "  help            Show this help message"
+    echo ""
+}
+
+if [ -z "$1" ]; then
+    show_help
+    exit 1
+fi
+
+case "$1" in
+    install|get)
+        shift
+        if [ -z "$1" ]; then echo -e "${RED}Error:${NC} What should I install?"; exit 1; fi
+        sudo pacman -S "$@"
+        ;;
+    yeet|remove|delete)
+        shift
+        if [ -z "$1" ]; then echo -e "${RED}Error:${NC} What should I yeet?"; exit 1; fi
+        sudo pacman -Rns "$@"
+        ;;
+    update|up|sync)
+        sudo pacman -Syu
+        # Also clean font cache if it looks major, just for polish
+        ;;
+    search|find)
+        shift
+        pacman -Ss "$@"
+        ;;
+    clean)
+        # Remove orphans and clean cache
+        sudo pacman -Rns $(pacman -Qtdq) 2>/dev/null
+        sudo pacman -Sc
+        ;;
+    info)
+        shift
+        if [ -z "$1" ]; then echo -e "${RED}Error:${NC} Which package?"; exit 1; fi
+        pacman -Si "$@"
+        ;;
+    list)
+        pacman -Q
+        ;;
+    autoremove)
+        sudo pacman -Rns $(pacman -Qtdq)
+        ;;
+    help|--help|-h)
+        show_help
+        ;;
+    *)
+        echo -e "${RED}Unknown command:${NC} $1"
+        show_help
+        exit 1
+        ;;
+esac

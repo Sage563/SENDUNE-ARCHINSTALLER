@@ -1,5 +1,5 @@
 import sys
-import sys
+
 import time
 import math
 import threading
@@ -38,6 +38,13 @@ class RGB3DLogo:
         self.top = top
         self.speed = speed
         self.bold = bold
+        
+        # Windows fix: force utf-8 for stdout if possible
+        if sys.platform == "win32" and hasattr(sys.stdout, 'reconfigure'):
+            try:
+                sys.stdout.reconfigure(encoding='utf-8')
+            except Exception:
+                pass
 
         self._shift = 0
         self._stop_event = threading.Event()
@@ -76,7 +83,21 @@ class RGB3DLogo:
             sys.stdout.write(f"\033[{self.top + i};1H\033[K")
             start_col, painted = self._carving_text(line, self._shift + i)
             sys.stdout.write(f"\033[{self.top + i};{start_col}H")
-            sys.stdout.write(painted)
+            try:
+                sys.stdout.write(painted)
+            except UnicodeEncodeError:
+                # If terminal can't handle unicode, strip colors/fancy chars or just print simple
+                # For now, simplistic fallback: replace block chars with #
+                safe_painted = painted.encode('ascii', errors='replace').decode('ascii')
+                # But 'painted' has color codes. We might just suppress or try to print safe version.
+                # Actually, the error is likely the block characters.
+                # Let's try to reconfigure stdout once in __init__? 
+                # Doing it here is safer for a quick patch:
+                try:
+                     sys.stdout.reconfigure(encoding='utf-8')
+                     sys.stdout.write(painted)
+                except Exception:
+                     pass # Give up on this frame if still failing
         sys.stdout.flush()
 
     def _run_loop(self):

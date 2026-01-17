@@ -1,86 +1,27 @@
-# Maintainer: David Runge <dvzrv@archlinux.org>
-# Maintainer: Giancarlo Razzolini <grazzolini@archlinux.org>
-# Maintainer: Anton Hvornum <torxed@archlinux.org>
-# Contributor: Anton Hvornum <anton@hvornum.se>
-# Contributor: demostanis worlds <demostanis@protonmail.com>
 
-pkgname=SENDUNE
+pkgname=SENDUNE-installer
 pkgver=3.0.11
 pkgrel=1
 pkgdesc="Just another guided/automated Arch Linux installer with a twist"
-arch=(any)
-url="https://github.com/archlinux/archinstall"
-license=(GPL-3.0-only)
-depends=(
-  'arch-install-scripts'
-  'btrfs-progs'
-  'coreutils'
-  'cryptsetup'
-  'dosfstools'
-  'e2fsprogs'
-  'glibc'
-  'kbd'
-  'libcrypt.so'
-  'libxcrypt'
-  'pciutils'
-  'procps-ng'
-  'python'
-  'python-cryptography'
-  'python-pydantic'
-  'python-pyparted'
-  'systemd'
-  'util-linux'
-  'xfsprogs'
-  'lvm2'
-  'f2fs-tools'
-  'ntfs-3g'
-)
-makedepends=(
-  'python-build'
-  'python-installer'
-  'python-setuptools'
-  'python-sphinx'
-  'python-wheel'
-  'python-sphinx_rtd_theme'
-  'python-pylint'
-  'python-pylint-pydantic'
-  'ruff'
-)
-optdepends=(
-  'python-systemd: Adds journald logging'
-)
-provides=(python-archinstall archinstall)
-conflicts=(python-archinstall archinstall-git)
-replaces=(python-archinstall archinstall-git)
-source=(
-  $pkgname-$pkgver.tar.gz::$url/archive/refs/tags/$pkgver.tar.gz
-  $pkgname-$pkgver.tar.gz.sig::$url/releases/download/$pkgver/$pkgname-$pkgver.tar.gz.sig
-)
-sha512sums=()
-b2sums=()
-validpgpkeys=('8AA2213C8464C82D879C8127D4B58E897A929F2E') # torxed@archlinux.org
+arch=('any')
+url="https://github.com/Sendune/Sendune"
+license=('GPL3')
+depends=('python' 'python-pyparted' 'python-pydantic' 'arch-install-scripts' 'util-linux')
+makedepends=('python-setuptools' 'python-build' 'python-installer' 'python-wheel')
+provides=('sendune-installer')
+conflicts=('sendune-installer')
 
-check() {
-  cd $pkgname-$pkgver
-  ruff check
-}
-
-pkgver() {
-  cd $pkgname-$pkgver
-
-  awk '$1 ~ /^__version__/ {gsub("\"", ""); print $3}' archinstall/__init__.py
-}
-
-build() {
-  cd $pkgname-$pkgver
-
-  python -m build --wheel --no-isolation
-  PYTHONDONTWRITEBYTECODE=1 make man -C docs
-}
+# We use local files, so no source URL
+source=("file://$(pwd)/setup.py"
+        "file://$(pwd)/SENDUNE_installer")
+md5sums=('SKIP' 'SKIP')
 
 package() {
-  cd "$pkgname-$pkgver"
-
+  # We copy the entire directory to the package build area
+  # Because makepkg usually works in a separate src dir, we need to handle local sources carefully.
+  # However, for a simple local build, we can just install from the current directory.
+  
+  cd "$startdir"
+  python -m build --wheel --no-isolation --outdir dist
   python -m installer --destdir="$pkgdir" dist/*.whl
-  install -vDm 644 docs/_build/man/archinstall.1 -t "$pkgdir/usr/share/man/man1/"
 }
