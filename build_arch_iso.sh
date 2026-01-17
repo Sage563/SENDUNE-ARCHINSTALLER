@@ -1,1 +1,182 @@
-#!/bin/bashset -e# SENDUNE Arch ISO Builder# Builds a custom Arch Linux ISO with SENDUNE installer# Colors for outputRED='\033[0;31m'GREEN='\033[0;32m'YELLOW='\033[1;33m'BLUE='\033[0;34m'NC='\033[0m' # No Color# Logging functionlog() {    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"}error() {    echo -e "${RED}ERROR:${NC} $1" >&2}success() {    echo -e "${GREEN}SUCCESS:${NC} $1"}# Checks if running on Linuxif [[ "$OSTYPE" != "linux-gnu"* ]]; then    error "This script must be run on Linux."    exit 1fi# Check if required tools are availablecheck_dependencies() {    local deps=("rsync" "sudo" "mount" "umount" "xorriso" "chroot")    for dep in "${deps[@]}"; do        if ! command -v "$dep" >/dev/null 2>&1; then            error "Required tool '$dep' not found. Please install it."            exit 1        fi    done    log "All dependencies found."}# Usage functionusage() {    echo "Usage: $0 <SOURCE_ISO> <SENDUNE_DIR> <OUTPUT_ISO> [WORK_DIR]"    echo ""    echo "Arguments:"    echo "  SOURCE_ISO   Path to the original Arch Linux ISO"    echo "  SENDUNE_DIR  Path to the SENDUNE installer directory"    echo "  OUTPUT_ISO   Path for the output custom ISO"    echo "  WORK_DIR     Working directory (default: ./iso_work)"    echo ""    echo "Example:"    echo "  $0 archlinux-x86_64.iso ./SENDUNE_installer ./SENDUNE_Arch.iso"    exit 1}# === Config ===SOURCE_ISO="$1"SENDUNE_DIR="$2"OUTPUT_ISO="$3"WORK_DIR="${4:-./iso_work}"# Validate argumentsif [ $# -lt 3 ]; then    usagefiif [ ! -f "$SOURCE_ISO" ]; then    error "Source ISO '$SOURCE_ISO' not found."    exit 1fiif [ ! -d "$SENDUNE_DIR" ]; then    error "SENDUNE directory '$SENDUNE_DIR' not found."    exit 1fi# Check dependenciescheck_dependencieslog "Starting SENDUNE ISO build process..."log "Source ISO: $SOURCE_ISO"log "SENDUNE Dir: $SENDUNE_DIR"log "Output ISO: $OUTPUT_ISO"log "Work Dir: $WORK_DIR"# === Prepare working directories ===log "Preparing working directories..."rm -rf "$WORK_DIR"mkdir -p "$WORK_DIR/mnt" "$WORK_DIR/extract"# Cleanup functioncleanup() {    log "Cleaning up..."    sudo umount "$WORK_DIR/mnt" 2>/dev/null || true    sudo umount "$WORK_DIR/extract/dev" 2>/dev/null || true    sudo umount "$WORK_DIR/extract/sys" 2>/dev/null || true    sudo umount "$WORK_DIR/extract/proc" 2>/dev/null || true    sudo umount "$WORK_DIR/extract/run" 2>/dev/null || true    rm -rf "$WORK_DIR"}# Set trap for cleanup on exittrap cleanup EXIT# === Mount original ISO ===log "Mounting original ISO..."if ! sudo mount -o loop "$SOURCE_ISO" "$WORK_DIR/mnt"; then    error "Failed to mount ISO."    exit 1fi# === Copy ISO contents ===log "Copying ISO contents..."if ! rsync -a --exclude=archinstall/SENDUNE_installer "$WORK_DIR/mnt/" "$WORK_DIR/extract/"; then    error "Failed to copy ISO contents."    exit 1fi# === Add SENDUNE installer ===log "Adding SENDUNE installer..."mkdir -p "$WORK_DIR/extract/archinstall"if ! cp -r "$SENDUNE_DIR" "$WORK_DIR/extract/archinstall/"; then    error "Failed to copy SENDUNE installer."    exit 1fi# === Download and add archinstall source ===log "Downloading archinstall source..."if command -v git >/dev/null 2>&1; then    git clone https://github.com/archlinux/archinstall.git "$WORK_DIR/extract/root/archinstall-git" || log "Warning: Failed to clone archinstall"else    log "Warning: git not available, skipping archinstall source download"fi# === Attempt to install `archinstall` into the ISO filesystem ===# This chroots into the extracted ISO and runs pacman to install archinstall# Requires network and root; this step is best-effort and will be skipped# if `pacman` is not available on the build host.echo "Attempting to install archinstall into ISO filesystem (best-effort)..."# Bind mount necessary pseudo-filesystems into the extracted ISO so chrooted# package installation tools can work. We keep this best-effort and continue# even if parts fail.sudo mount --bind /dev "$WORK_DIR/extract/dev" || truesudo mount --bind /sys "$WORK_DIR/extract/sys" || truesudo mount --bind /proc "$WORK_DIR/extract/proc" || truesudo mount --bind /run "$WORK_DIR/extract/run" || truesudo cp -L /etc/resolv.conf "$WORK_DIR/extract/etc/resolv.conf" || true# Create a small installer script inside the extracted tree that will detect# the package manager available inside the chroot and try to install# `archinstall` using the appropriate method (native package or pip).cat > "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh" <<'SH'#!/usr/bin/env bashset -eecho "[sendune] running archinstall installer inside chroot"if command -v pacman >/dev/null 2>&1; then  echo "[sendune] detected pacman -> installing archinstall and dependencies"  # Install base-devel tools and python deps  pacman -Sy --noconfirm base-devel gcc git pkgconfig python python-pip python-uv python-setuptools python-pyparted python-pydantic || true  # Install yay (AUR helper)  echo "[sendune] installing yay AUR helper"  if [ ! -d /tmp/yay ]; then    git clone https://aur.archlinux.org/yay.git /tmp/yay || true    cd /tmp/yay    makepkg -si --noconfirm || true    cd -  fi  # Try to build archinstall from source if available  if [ -d /root/archinstall-git ]; then    cd /root/archinstall-git    rm -rf dist    uv build --no-build-isolation --wheel || true    uv pip install dist/*.whl --break-system-packages --system --no-build --no-deps || true    echo "This is an unofficial ISO for development and testing of archinstall. No support will be provided."    echo "This ISO was built from Git SHA $GITHUB_SHA"    echo "Type archinstall to launch the installer."  else    pacman -Sy --noconfirm archinstall || true  fi  if command -v pip >/dev/null 2>&1; then    pip install --upgrade pip setuptools wheel || true    # Fallback/Ensure archinstall and critical deps are present via pip if system package failed or is old    pip install archinstall pydantic || true  fi  exit 0fiif command -v apt-get >/dev/null 2>&1; then  echo "[sendune] detected apt -> installing pip and archinstall via pip"  export DEBIAN_FRONTEND=noninteractive  apt-get update || true  apt-get install -y python3-pip python3-venv python3-parted git build-essential pkg-config || true  if command -v pip3 >/dev/null 2>&1; then    pip3 install --upgrade pip setuptools wheel || true    pip3 install archinstall pydantic || true  fi  exit 0fiif command -v dnf >/dev/null 2>&1; then  echo "[sendune] detected dnf -> installing pip and archinstall via pip"  dnf install -y python3-pip || true  if command -v pip3 >/dev/null 2>&1; then    pip3 install --upgrade pip setuptools wheel || true    pip3 install archinstall || true  fi  exit 0fiif command -v zypper >/dev/null 2>&1; then  echo "[sendune] detected zypper -> installing pip and archinstall via pip"  zypper refresh || true  zypper install -y python3-pip || true  if command -v pip3 >/dev/null 2>&1; then    pip3 install --upgrade pip setuptools wheel || true    pip3 install archinstall || true  fi  exit 0fi# Fallback: try pip if availableif command -v pip3 >/dev/null 2>&1; then  echo "[sendune] no package manager detected, using pip3"  pip3 install --upgrade pip setuptools wheel || true  pip3 install archinstall || trueelse  echo "[sendune] no supported package manager or pip found in chroot; skipping"fiSHsudo chmod +x "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh" || true# Execute the installer script inside the chroot. Prefer `arch-chroot` when# available (it sets up some extra mounts on Arch hosts), otherwise use a# plain `chroot` invocation. Keep failures non-fatal (best-effort).if command -v arch-chroot >/dev/null 2>&1; then  sudo arch-chroot "$WORK_DIR/extract" /tmp/sendune_install_archinstall.sh || trueelse  sudo chroot "$WORK_DIR/extract" /bin/bash -c "/tmp/sendune_install_archinstall.sh" || truefi# Cleanup bindssudo umount "$WORK_DIR/extract/dev" || truesudo umount "$WORK_DIR/extract/sys" || truesudo umount "$WORK_DIR/extract/proc" || truesudo umount "$WORK_DIR/extract/run" || true# Remove the temporary installer scriptsudo rm -f "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh" || true# === Unmount ISO ===sudo umount "$WORK_DIR/mnt"# === Repack ISO ===log "Repacking ISO..."cd "$WORK_DIR/extract"# Ensure xorriso (and isolinux/syslinux files) exist on the hostxorriso_check() {  if command -v xorriso >/dev/null 2>&1; then    return 0  fi  log "xorriso not found — attempting to install xorriso (best-effort)"  if command -v pacman >/dev/null 2>&1; then    sudo pacman -Sy --noconfirm xorriso syslinux || log "Warning: Could not install xorriso via pacman"    return 0  fi  if command -v apt-get >/dev/null 2>&1; then    sudo apt-get update || true    sudo apt-get install -y xorriso syslinux || log "Warning: Could not install xorriso via apt"    return 0  fi  if command -v dnf >/dev/null 2>&1; then    sudo dnf install -y xorriso syslinux || log "Warning: Could not install xorriso via dnf"    return 0  fi  if command -v zypper >/dev/null 2>&1; then    sudo zypper install -y xorriso syslinux || log "Warning: Could not install xorriso via zypper"    return 0  fi  if command -v apk >/dev/null 2>&1; then    sudo apk add xorriso syslinux || log "Warning: Could not install xorriso via apk"    return 0  fi  error "Could not auto-install xorriso; please install it manually and re-run the script."  return 1}# Check for xorrisoif ! xorriso_check; then  exit 1fi# Create the ISOif xorriso -as mkisofs \  -iso-level 3 \  -full-iso9660-filenames \  -volid "SENDUNE_ARCH" \  -output "$OUTPUT_ISO" \  -eltorito-boot isolinux/isolinux.bin \  -eltorito-catalog isolinux/boot.cat \  -no-emul-boot -boot-load-size 4 -boot-info-table \  -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \  -eltorito-alt-boot -e EFI/archiso/efiboot.img -no-emul-boot \  .; then  success "ISO created successfully at $OUTPUT_ISO"else  error "Failed to create ISO."  exit 1filog "Build process completed successfully!"# Instructionsecho ""echo "=== Next Steps ==="echo "1. Boot the resulting $OUTPUT_ISO"echo "2. In the live environment, run:"echo "   python3 -m SENDUNE_installer"echo ""echo "For more information, see README.md"
+#!/usr/bin/env bash
+set -e
+
+# =========================================================
+# SENDUNE Arch ISO Builder
+# Builds a custom Arch Linux ISO with SENDUNE installer
+# =========================================================
+
+# ---------- Colors ----------
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
+
+# ---------- Logging ----------
+log() {
+    echo -e "${BLUE}[$(date +'%Y-%m-%d %H:%M:%S')]${NC} $1"
+}
+
+error() {
+    echo -e "${RED}ERROR:${NC} $1" >&2
+}
+
+success() {
+    echo -e "${GREEN}SUCCESS:${NC} $1"
+}
+
+# ---------- OS Check ----------
+if [[ "$OSTYPE" != "linux-gnu"* ]]; then
+    error "This script must be run on Linux."
+    exit 1
+fi
+
+# ---------- Dependency Check ----------
+check_dependencies() {
+    local deps=("rsync" "sudo" "mount" "umount" "xorriso" "chroot")
+    for dep in "${deps[@]}"; do
+        if ! command -v "$dep" >/dev/null 2>&1; then
+            error "Required tool '$dep' not found."
+            exit 1
+        fi
+    done
+    log "All dependencies found."
+}
+
+# ---------- Usage ----------
+usage() {
+    echo "Usage: $0 <SOURCE_ISO> <SENDUNE_DIR> <OUTPUT_ISO> [WORK_DIR]"
+    echo
+    echo "Arguments:"
+    echo "  SOURCE_ISO   Path to the original Arch Linux ISO"
+    echo "  SENDUNE_DIR  Path to the SENDUNE installer directory"
+    echo "  OUTPUT_ISO   Path for the output custom ISO"
+    echo "  WORK_DIR     Working directory (default: ./iso_work)"
+    echo
+    echo "Example:"
+    echo "  $0 archlinux-x86_64.iso ./SENDUNE_installer ./SENDUNE_Arch.iso"
+    exit 1
+}
+
+# ---------- Config ----------
+SOURCE_ISO="$1"
+SENDUNE_DIR="$2"
+OUTPUT_ISO="$3"
+WORK_DIR="${4:-./iso_work}"
+
+# ---------- Validate Arguments ----------
+[[ $# -lt 3 ]] && usage
+
+[[ ! -f "$SOURCE_ISO" ]] && error "Source ISO not found." && exit 1
+[[ ! -d "$SENDUNE_DIR" ]] && error "SENDUNE directory not found." && exit 1
+
+check_dependencies
+
+log "Starting SENDUNE ISO build"
+log "Source ISO : $SOURCE_ISO"
+log "SENDUNE Dir: $SENDUNE_DIR"
+log "Output ISO : $OUTPUT_ISO"
+log "Work Dir   : $WORK_DIR"
+
+# ---------- Prepare Directories ----------
+rm -rf "$WORK_DIR"
+mkdir -p "$WORK_DIR/mnt" "$WORK_DIR/extract"
+
+cleanup() {
+    log "Cleaning up..."
+    sudo umount "$WORK_DIR/mnt" 2>/dev/null || true
+    for fs in dev sys proc run; do
+        sudo umount "$WORK_DIR/extract/$fs" 2>/dev/null || true
+    done
+    rm -rf "$WORK_DIR"
+}
+trap cleanup EXIT
+
+# ---------- Mount ISO ----------
+log "Mounting ISO..."
+sudo mount -o loop "$SOURCE_ISO" "$WORK_DIR/mnt"
+
+# ---------- Copy ISO ----------
+log "Copying ISO contents..."
+rsync -a --exclude=archinstall/SENDUNE_installer \
+    "$WORK_DIR/mnt/" "$WORK_DIR/extract/"
+
+# ---------- Add SENDUNE ----------
+log "Adding SENDUNE installer..."
+mkdir -p "$WORK_DIR/extract/archinstall"
+cp -r "$SENDUNE_DIR" "$WORK_DIR/extract/archinstall/"
+
+# ---------- Clone Archinstall ----------
+if command -v git >/dev/null 2>&1; then
+    log "Cloning archinstall source..."
+    git clone https://github.com/archlinux/archinstall.git \
+        "$WORK_DIR/extract/root/archinstall-git" || true
+fi
+
+# ---------- Prepare Chroot ----------
+log "Preparing chroot environment..."
+for fs in dev sys proc run; do
+    sudo mount --bind "/$fs" "$WORK_DIR/extract/$fs" || true
+done
+sudo cp -L /etc/resolv.conf "$WORK_DIR/extract/etc/resolv.conf" || true
+
+# ---------- Archinstall Installer Script ----------
+cat > "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh" <<'EOF'
+#!/usr/bin/env bash
+set -e
+
+echo "[sendune] Installing archinstall (best-effort)"
+
+if command -v pacman >/dev/null; then
+    pacman -Sy --noconfirm python python-pip git base-devel || true
+    pacman -Sy --noconfirm archinstall || true
+fi
+
+if command -v pip3 >/dev/null; then
+    pip3 install --upgrade pip setuptools wheel || true
+    pip3 install archinstall pydantic || true
+fi
+EOF
+
+chmod +x "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh"
+
+if command -v arch-chroot >/dev/null 2>&1; then
+    sudo arch-chroot "$WORK_DIR/extract" /tmp/sendune_install_archinstall.sh || true
+else
+    sudo chroot "$WORK_DIR/extract" /bin/bash /tmp/sendune_install_archinstall.sh || true
+fi
+
+# ---------- Cleanup Chroot ----------
+for fs in dev sys proc run; do
+    sudo umount "$WORK_DIR/extract/$fs" || true
+done
+rm -f "$WORK_DIR/extract/tmp/sendune_install_archinstall.sh"
+
+# ---------- Unmount ISO ----------
+sudo umount "$WORK_DIR/mnt"
+
+# ---------- Build ISO ----------
+log "Repacking ISO..."
+cd "$WORK_DIR/extract"
+
+xorriso -as mkisofs \
+    -iso-level 3 \
+    -full-iso9660-filenames \
+    -volid "SENDUNE_ARCH" \
+    -output "$OUTPUT_ISO" \
+    -eltorito-boot isolinux/isolinux.bin \
+    -eltorito-catalog isolinux/boot.cat \
+    -no-emul-boot -boot-load-size 4 -boot-info-table \
+    -isohybrid-mbr /usr/lib/ISOLINUX/isohdpfx.bin \
+    -eltorito-alt-boot \
+    -e EFI/archiso/efiboot.img -no-emul-boot \
+    .
+
+success "ISO created at $OUTPUT_ISO"
+
+echo
+echo "=== Next Steps ==="
+echo "1. Boot the ISO"
+echo "2. Run: python3 -m SENDUNE_installer"
+echo
