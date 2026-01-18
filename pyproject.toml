@@ -3,30 +3,34 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "SENDUNE"
-version = "3.0.11"
-description = "Arch Linux installer - guided, templates etc."
+name = "sendune"
+version = "2.0.0"
+description = "SENDUNE Linux - A modern Arch-based Linux distribution installer"
 authors = [
-    {name = "Anton Hvornum", email = "anton@hvornum.se"},
+    {name = "SENDUNE Team"},
+    {name = "Sage563"},
 ]
 license = "GPL-3.0-only"
 readme = "README.md"
 requires-python = ">=3.12"
-keywords = ["linux", "arch", "archinstall", "installer"]
+keywords = ["linux", "arch", "sendune", "installer", "distribution"]
 classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: POSIX :: Linux",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: System :: Installation/Setup",
 ]
 dependencies = [
     "pyparted>=3.13.0",
-    "pydantic==2.11.9",
-    "cryptography>=45.0.7",
+    "pydantic>=2.0.0",
 ]
 
 [project.urls]
-Home = "https://archlinux.org"
-Documentation = "https://archinstall.readthedocs.io/"
-Source = "https://github.com/archlinux/archinstall"
+Home = "https://github.com/Sage563/SENDUNE-ARCHINSTALLER"
+Documentation = "https://github.com/Sage563/SENDUNE-ARCHINSTALLER/wiki"
+Source = "https://github.com/Sage563/SENDUNE-ARCHINSTALLER"
+Issues = "https://github.com/Sage563/SENDUNE-ARCHINSTALLER/issues"
 
 [project.optional-dependencies]
 log = ["systemd_python==235"]
@@ -42,9 +46,8 @@ dev = [
 doc = ["sphinx"]
 
 [project.scripts]
-# archinstall script removed to avoid exposing the upstream `archinstall` CLI
-# when this package is installed. The SENDUNE installer should be invoked via
-# the provided console scripts (`Senduneinstaller` / `senduneinstaller`).
+# Main SENDUNE installer command - just type 'sendune' to run
+sendune = "SENDUNE_installer.full_installation:starting_Sendune"
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.rst", "USAGE.rst"]}
@@ -61,9 +64,15 @@ include-package-data = true
     "**/*.pot",
     "**/*.json",
 ]
+"SENDUNE_installer" = [
+    "**/*.py",
+    "**/*.png",
+    "**/*.json",
+]
 
 [tool.setuptools.package-dir]
 archinstall = "archinstall"
+SENDUNE_installer = "SENDUNE_installer"
 
 [tool.mypy]
 python_version = "3.12"

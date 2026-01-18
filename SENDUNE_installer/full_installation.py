@@ -41,7 +41,9 @@ from .installer_functions import (
     interactive_enterprise_features,
     install_feature_updater,
     MOCK_MODE,
-    run_command
+    run_command,
+    DEFAULT_SERVICES,
+    CUSTOM_COMMANDS,
 )
 from .dotfiles import write_hyprland_config, write_bashrc
 try:
@@ -60,7 +62,8 @@ BASE_PACKAGES = [
     'base', 'linux', 'linux-firmware', 'vim', 'sudo', 'git', 'bash-completion',
     'networkmanager', 'openssh', 'bluez', 'bluez-utils', 'pulseaudio', 'htop',
     'neofetch', 'zsh', 'curl', 'wget', 'docker', 'python', 'python-pip',
-    'nodejs', 'npm', 'firefox', 'chromium', 'code', 'yay'
+    'nodejs', 'npm', 'firefox', 'chromium', 'code', 'yay' , "gcc" , "base-devel", "fdisk", "gparted", "ntfs-3g"
+    ,"exfatprogs"
 ]
 
 # Removed duplicate base packages definition and duplicate desktop packages variable
@@ -224,12 +227,12 @@ ID=sendune
 ID_LIKE=arch
 BUILD_ID=rolling
 ANSI_COLOR="38;2;23;147;209"
-HOME_URL="https://github.com/Sendune/Sendune"
-SUPPORT_URL="https://github.com/Sendune/Sendune/issues"
-BUG_REPORT_URL="https://github.com/Sendune/Sendune/issues"
+HOME_URL="https://github.com/Sage563/SENDUNE-ARCHINSTALLER"
+SUPPORT_URL="https://github.com/Sage563/SENDUNE-ARCHINSTALLER/issues"
+BUG_REPORT_URL="https://github.com/Sage563/SENDUNE-ARCHINSTALLER/issues"
 LOGO=sendune-logo
 VERSION_CODENAME="Innovation"
-DOCUMENTATION_URL="https://github.com/Sendune/Sendune/wiki"
+DOCUMENTATION_URL="https://github.com/Sage563/SENDUNE-ARCHINSTALLER/wiki"
 """)
         
         # /etc/lsb-release
@@ -340,39 +343,118 @@ DISTRIB_DESCRIPTION="SENDUNE Linux"
     print("4. Configure additional settings as needed")
     print("\n📄 Log file: " + str(LOGDIR))
     print("="*50)
+
+def show_welcome_screen():
+    """Display a welcome screen with system information."""
+    os.system('clear' if os.name != 'nt' else 'cls')
+    
+    print("\033[1;36m")  # Cyan color
+    print("╔═══════════════════════════════════════════════════════════════╗")
+    print("║                                                               ║")
+    print("║   ███████╗███████╗███╗   ██╗██████╗ ██╗   ██╗███╗   ██╗███████╗  ║")
+    print("║   ██╔════╝██╔════╝████╗  ██║██╔══██╗██║   ██║████╗  ██║██╔════╝  ║")
+    print("║   ███████╗█████╗  ██╔██╗ ██║██║  ██║██║   ██║██╔██╗ ██║█████╗    ║")
+    print("║   ╚════██║██╔══╝  ██║╚██╗██║██║  ██║██║   ██║██║╚██╗██║██╔══╝    ║")
+    print("║   ███████║███████╗██║ ╚████║██████╔╝╚██████╔╝██║ ╚████║███████╗  ║")
+    print("║   ╚══════╝╚══════╝╚═╝  ╚═══╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝  ║")
+    print("║                                                               ║")
+    print("║              SENDUNE Linux Installer v2.0                     ║")
+    print("║                                                               ║")
+    print("╚═══════════════════════════════════════════════════════════════╝")
+    print("\033[0m")  # Reset color
+    
+    # Show system info
+    print("\n\033[1;33m📊 System Information:\033[0m")
+    if MOCK_MODE:
+        print("  • Running in MOCK MODE (Windows development)")
+        print("  • No actual changes will be made")
+    else:
+        try:
+            # CPU info
+            with open('/proc/cpuinfo', 'r') as f:
+                for line in f:
+                    if 'model name' in line:
+                        cpu = line.split(':')[1].strip()
+                        print(f"  • CPU: {cpu}")
+                        break
+            
+            # Memory info
+            with open('/proc/meminfo', 'r') as f:
+                for line in f:
+                    if line.startswith('MemTotal:'):
+                        mem_kb = int(line.split()[1])
+                        mem_gb = mem_kb / (1024 * 1024)
+                        print(f"  • RAM: {mem_gb:.1f} GB")
+                        break
+        except Exception:
+            print("  • System info unavailable")
+    
+    print("\n\033[1;32m✓ Press Enter to begin installation...\033[0m")
+    input()
+
 def starting_Sendune() -> None:
-    print("Starting SENDUNE Installer...")
-
-    # Start animated logo early
-    logo_animation = logo_start()
-
-    mount_point = get_mount_point(logo_animation)
-    print(f"Installer will use: {mount_point} as mount point.")
-
-    # Initialize log
-    log = LogFile(LOGDIR)
-    log.info("Installer started.")
-
+    """Main entry point for the SENDUNE installer."""
     try:
-        if Installer is None and not MOCK_MODE:
-            raise RuntimeError("archinstall package not available. Install with: pacman -Sy archinstall")
+        # Show welcome screen first
+        show_welcome_screen()
         
-        if MOCK_MODE:
-             log.info("[MOCK] Initializing Mock Installer")
-             installer = None
-        else:
-            installer = define_installer(mount_point, log)
+        print("Starting SENDUNE Installer...")
         
-        full_installation(installer, log, logo_animation)
+        # Start animated logo
+        logo_animation = logo_start()
+        
+        # Get mount point
+        mount_point = get_mount_point(logo_animation)
+        print(f"Installer will use: {mount_point} as mount point.")
+        
+        # Initialize log
+        log = LogFile(LOGDIR)
+        log.info("SENDUNE Installer started.")
+        log.info(f"Mount point: {mount_point}")
+        log.info(f"Mock mode: {MOCK_MODE}")
+        
+        try:
+            if Installer is None and not MOCK_MODE:
+                raise RuntimeError(
+                    "archinstall package not available.\n"
+                    "Install with: pacman -Sy archinstall\n"
+                    "Or run the installer from the SENDUNE ISO."
+                )
+            
+            if MOCK_MODE:
+                log.info("[MOCK] Initializing Mock Installer")
+                installer = None
+            else:
+                installer = define_installer(mount_point, log)
+            
+            full_installation(installer, log, logo_animation)
+            
+        except KeyboardInterrupt:
+            print("\n\n⚠️  Installation cancelled by user.")
+            log.warn("Installation cancelled by user (Ctrl+C)")
+        except Exception as e:
+            log.error(f"Installation failed: {e}")
+            print(f"\n\033[1;31m❌ Installation failed: {e}\033[0m")
+            print("\nOptions:")
+            print("  1. Try again")
+            print("  2. Exit to shell")
+            
+            logo_animation.pause()  # Pause before input
+            choice = input("Choice (1/2): ").strip()
+            logo_animation.resume()
+            if choice == "1":
+                starting_Sendune()  # Restart
+                return
+        finally:
+            log.info("Installer finished.")
+            log.close()
+            logo_animation.stop()
+            print(f"\n📄 Log file saved to: {LOGDIR}")
+            
     except Exception as e:
-        log.error(f"Installation failed: {e}")
-        print(f"Installation failed: {e}")
-    finally:
-        log.info("Installer finished.")
-        log.info("Exiting installer.")
-        log.close()
-        logo_animation.stop()
-        print(f"Log file at {LOGDIR}")
+        print(f"\033[1;31mFatal error: {e}\033[0m")
+        import traceback
+        traceback.print_exc()
 
 if __name__ == "__main__":
     starting_Sendune()

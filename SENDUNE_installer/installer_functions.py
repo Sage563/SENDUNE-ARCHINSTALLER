@@ -1613,7 +1613,7 @@ def interactive_packages(installer: 'Installer', log: LogFile, logo_animation):
             log.info("[MOCK] Base packages installed.")
         if choice in ['d','a']:
             log.info("[MOCK] Desktop packages installed.")
-        input("Press Enter to continue...")
+        input_with_pause("Press Enter to continue...", logo_animation)
         return
 
     if choice in ['b','a']:
@@ -1625,7 +1625,7 @@ def interactive_packages(installer: 'Installer', log: LogFile, logo_animation):
     if choice in ['d','a']:
         installer.add_additional_packages(DESKTOP_PACKAGES)
         log.info("Desktop packages installed.")
-    input("Press Enter to continue...")
+    input_with_pause("Press Enter to continue...", logo_animation)
 
 def interactive_services(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Services Setup ===")
@@ -1754,7 +1754,7 @@ def interactive_format_partition(installer: 'Installer', log: LogFile, logo_anim
         fs_type = getattr(part, 'fs_type', 'ext4')
         print(f"{idx}. {part.path} (current fs: {fs_type})")
 
-    choice = input("Select partition number to format (0 to skip): ")
+    choice = input_with_pause("Select partition number to format (0 to skip): ", logo_animation)
     try:
         choice = int(choice)
         if choice == 0:
