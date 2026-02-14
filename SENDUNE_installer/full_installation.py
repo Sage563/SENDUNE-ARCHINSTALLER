@@ -21,20 +21,17 @@ from .installer_functions import (
     interactive_security_hardening,
     interactive_desktop_environment,
     interactive_locale_setup,
-    interactive_additional_features,
     interactive_login_manager,
     interactive_system_themes,
     interactive_system_utilities,
     interactive_network_services,
     interactive_system_automation,
     interactive_multimedia_tools,
-    interactive_office_productivity,
     interactive_ai_assistant,
     interactive_performance_tuning,
     interactive_cloud_integration,
     interactive_specialized_environments,
     interactive_system_health_monitoring,
-    interactive_accessibility_features,
     interactive_system_scoring,
     interactive_company_integrations,
     interactive_ai_powered_features,
@@ -44,8 +41,9 @@ from .installer_functions import (
     run_command,
     DEFAULT_SERVICES,
     CUSTOM_COMMANDS,
+    MockInstaller,
 )
-from .dotfiles import write_hyprland_config, write_bashrc
+from .dotfiles import write_bashrc, install_external_dotfiles
 try:
     from archinstall.lib.installer import Installer
     from archinstall.lib.args import arch_config_handler
@@ -62,8 +60,10 @@ BASE_PACKAGES = [
     'base', 'linux', 'linux-firmware', 'vim', 'sudo', 'git', 'bash-completion',
     'networkmanager', 'openssh', 'bluez', 'bluez-utils', 'pulseaudio', 'htop',
     'neofetch', 'zsh', 'curl', 'wget', 'docker', 'python', 'python-pip',
-    'nodejs', 'npm', 'firefox', 'chromium', 'code', 'yay' , "gcc" , "base-devel", "fdisk", "gparted", "ntfs-3g"
-    ,"exfatprogs"
+    'nodejs', 'npm', 'firefox', 'chromium', 'code', 'yay' , "gcc" , "base-devel", 
+    "fdisk", "gparted", "ntfs-3g" ,"exfatprogs", "pciutils", "usbutils", "man-db", 
+    "man-pages", "texinfo", "unzip", "unrar", "zip", "rsync", "net-tools", "neovim", 
+    "stow"
 ]
 
 # Removed duplicate base packages definition and duplicate desktop packages variable
@@ -149,24 +149,24 @@ def define_installer(mount_point, log: LogFile) -> Installer:
 # Main installation steps
 # =========================
 def full_installation(installer: Installer, log: LogFile, logo_animation: RGB3DLogo):
+    # 1. Setup mirrors and disks (MUST happen first)
     interactive_find_mirrors(installer, log, logo_animation)
     interactive_disk_format(installer, log, logo_animation)
     interactive_format_partition(installer, log, logo_animation)
-
-    # Mount partitions
+    
+    # 2. Mount partitions
     installer.mount_partitions()
     log.info(f"Mounted partitions at {installer.mount_point}")
 
-    # Choose desktop environment before installing packages
-    interactive_desktop_environment(installer, log, logo_animation)
-
-    # Install base Linux system
+    # 3. Install packages ON TARGET DISK
+    print("\n📦 Installing Base System & Hyprland to target disk...")
     installer.add_additional_packages(installer.base_packages)
     installer.add_additional_packages(DESKTOP_PACKAGES)
-
     installer.write_fstab()
+    log.info("Base Linux system and Hyprland installed on target disk.")
 
-    log.info("Base Linux system installed.")
+    # 4. Configurations
+    interactive_desktop_environment(installer, log, logo_animation)
 
     interactive_add_users(installer, log, logo_animation)
     interactive_wifi(installer, log, logo_animation)
@@ -174,7 +174,6 @@ def full_installation(installer: Installer, log: LogFile, logo_animation: RGB3DL
     interactive_development_tools(installer, log, logo_animation)
     interactive_security_hardening(installer, log, logo_animation)
     interactive_locale_setup(installer, log, logo_animation)
-    interactive_additional_features(installer, log, logo_animation)
     interactive_login_manager(installer, log, logo_animation)
     interactive_system_themes(installer, log, logo_animation)
     interactive_system_utilities(installer, log, logo_animation)
@@ -187,12 +186,11 @@ def full_installation(installer: Installer, log: LogFile, logo_animation: RGB3DL
     interactive_cloud_integration(installer, log, logo_animation)
     interactive_specialized_environments(installer, log, logo_animation)
     interactive_system_health_monitoring(installer, log, logo_animation)
-    interactive_accessibility_features(installer, log, logo_animation)
     interactive_system_scoring(installer, log, logo_animation)
     #interactive_company_integrations(installer, log, logo_animation)
     #interactive_ai_powered_features(installer, log, logo_animation)
     #interactive_enterprise_features(installer, log, logo_animation)
-    interactive_packages(installer, log, logo_animation)
+    # interactive_packages(installer, log, logo_animation) # Skip as we do it by default now
     interactive_services(installer, log, logo_animation)
     interactive_timezone(installer, log, logo_animation)
     interactive_bootloader(installer, log, logo_animation)
@@ -280,8 +278,9 @@ DISTRIB_DESCRIPTION="SENDUNE Linux"
                 home = Path(f"MOCK_HOME_{user.username}")
                 
             log.info(f"Installing dotfiles for {user.username} at {home}")
-            write_hyprland_config(home, log)
-            write_bashrc(home, log)
+            # write_hyprland_config(home, log) # Removed in favor of ML4W dotfiles
+            write_bashrc(home, log, installer.mount_point)
+            install_external_dotfiles(home, log, installer.mount_point)
             
             # Copy flip to /usr/local/bin
             flip_source = Path(__file__).parent / "assets" / "flip"
@@ -311,31 +310,6 @@ DISTRIB_DESCRIPTION="SENDUNE Linux"
     print("• Base Arch Linux system")
     print("• Selected desktop environment")
     print("• Login manager/display manager")
-    print("• AI-powered recommendations and optimizations")
-    print("• Graphics drivers")
-    print("• Development tools")
-    print("• Security features")
-    print("• System themes and utilities")
-    print("• Network services")
-    print("• System automation tools")
-    print("• Multimedia applications")
-    print("• Office and productivity software")
-    print("• Performance tuning")
-    print("• Cloud integration")
-    print("• AI-powered recommendations and optimizations")
-    print("• Performance tuning")
-    print("• Cloud integration")
-    print("• Specialized development environments")
-    print("• System health monitoring")
-    print("• Accessibility features")
-    print("• Configuration scoring and recommendations")
-    print("• Company integrations and partnerships")
-    print("• AI-powered features and automation")
-    print("• Enterprise-grade tools and services")
-    print("• AUR support with yay pre-installed")
-    print("• Additional software packages")
-    print("• User accounts and configurations")
-    print("• System services enabled")
     print("\n📝 Next steps:")
     print("1. Reboot your system")
     print("2. Login with your created user account")
@@ -347,20 +321,7 @@ DISTRIB_DESCRIPTION="SENDUNE Linux"
 def show_welcome_screen():
     """Display a welcome screen with system information."""
     os.system('clear' if os.name != 'nt' else 'cls')
-    
-    print("\033[1;36m")  # Cyan color
-    print("╔═══════════════════════════════════════════════════════════════╗")
-    print("║                                                               ║")
-    print("║   ███████╗███████╗███╗   ██╗██████╗ ██╗   ██╗███╗   ██╗███████╗  ║")
-    print("║   ██╔════╝██╔════╝████╗  ██║██╔══██╗██║   ██║████╗  ██║██╔════╝  ║")
-    print("║   ███████╗█████╗  ██╔██╗ ██║██║  ██║██║   ██║██╔██╗ ██║█████╗    ║")
-    print("║   ╚════██║██╔══╝  ██║╚██╗██║██║  ██║██║   ██║██║╚██╗██║██╔══╝    ║")
-    print("║   ███████║███████╗██║ ╚████║██████╔╝╚██████╔╝██║ ╚████║███████╗  ║")
-    print("║   ╚══════╝╚══════╝╚═╝  ╚═══╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝  ║")
-    print("║                                                               ║")
-    print("║              SENDUNE Linux Installer v2.0                     ║")
-    print("║                                                               ║")
-    print("╚═══════════════════════════════════════════════════════════════╝")
+
     print("\033[0m")  # Reset color
     
     # Show system info
@@ -394,6 +355,21 @@ def show_welcome_screen():
 
 def starting_Sendune() -> None:
     """Main entry point for the SENDUNE installer."""
+    # Windows fix: force utf-8 for stdout if possible to handle box drawing characters
+    if sys.platform == "win32" and hasattr(sys.stdout, 'reconfigure'):
+        try:
+            import io
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        except Exception:
+            pass
+
+    # Early dependency check to avoid crash loops
+    if Installer is None and not MOCK_MODE:
+        print("\n\033[1;31m❌ Error: archinstall core dependency is missing.\033[0m")
+        print("This program cannot run without archinstall.")
+        print("Please ensure the ISO was built correctly.")
+        sys.exit(1)
+
     try:
         # Show welcome screen first
         show_welcome_screen()
@@ -402,6 +378,7 @@ def starting_Sendune() -> None:
         
         # Start animated logo
         logo_animation = logo_start()
+        logo_animation.set_scroll_region(top=8)
         
         # Get mount point
         mount_point = get_mount_point(logo_animation)
@@ -423,7 +400,7 @@ def starting_Sendune() -> None:
             
             if MOCK_MODE:
                 log.info("[MOCK] Initializing Mock Installer")
-                installer = None
+                installer = MockInstaller(mount_point=mount_point, base_packages=BASE_PACKAGES)
             else:
                 installer = define_installer(mount_point, log)
             
@@ -439,9 +416,7 @@ def starting_Sendune() -> None:
             print("  1. Try again")
             print("  2. Exit to shell")
             
-            logo_animation.pause()  # Pause before input
-            choice = input("Choice (1/2): ").strip()
-            logo_animation.resume()
+            choice = input_with_pause("Choice (1/2): ", logo_animation).strip()
             if choice == "1":
                 starting_Sendune()  # Restart
                 return
@@ -451,6 +426,20 @@ def starting_Sendune() -> None:
             logo_animation.stop()
             print(f"\n📄 Log file saved to: {LOGDIR}")
             
+            # Final Reboot Prompt
+            print("\n" + "!"*50)
+            print("  INSTALLATION COMPLETE - REBOOT REQUIRED")
+            print("!"*50)
+            reboot = input("\nWould you like to reboot now? (y/n): ").strip().lower()
+            if reboot == 'y':
+                print("Rebooting system...")
+                if not MOCK_MODE:
+                    os.system('reboot')
+                else:
+                    print("[MOCK] System would reboot now.")
+            else:
+                print("Please remember to reboot manually to enter your new system.")
+
     except Exception as e:
         print(f"\033[1;31mFatal error: {e}\033[0m")
         import traceback

@@ -63,6 +63,41 @@ except Exception:
             self.is_admin = is_admin
 
 
+class MockInstaller:
+    """A mock installer class for development on Windows."""
+    def __init__(self, mount_point=None, base_packages=None, **kwargs):
+        self.mount_point = mount_point or Path("MOCK_MOUNT_POINT")
+        self.base_packages = base_packages or []
+        self.additional_packages = []
+        self.services = []
+        self.users = []
+        self.desktop_packages = []
+
+    def mount_partitions(self):
+        print(f"[MOCK] Mounting partitions at {self.mount_point}")
+
+    def add_additional_packages(self, packages):
+        print(f"[MOCK] Adding additional packages: {packages}")
+        if isinstance(packages, list):
+            self.additional_packages.extend(packages)
+        else:
+            self.additional_packages.append(packages)
+
+    def enable_service(self, services):
+        print(f"[MOCK] Enabling services: {services}")
+        if isinstance(services, list):
+            self.services.extend(services)
+        else:
+            self.services.append(services)
+
+    def write_fstab(self):
+        print(f"[MOCK] Writing fstab to {self.mount_point}/etc/fstab")
+
+    def create_users(self, users):
+        print(f"[MOCK] Creating users: {[u.username for u in users]}")
+        self.users.extend(users)
+
+
 def ensure_archinstall_available(log: LogFile = None):
     if not ARCHINSTALL_AVAILABLE and not MOCK_MODE:
         msg = (
@@ -1554,7 +1589,7 @@ def interactive_disk_format(installer: 'Installer', log: LogFile, logo_animation
     else:
         print("Skipping disk formatting.")
         log.info("Disk formatting skipped.")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def add_user(installer, log: LogFile, logo_animation):
     print("\n=== Add New User ===")
@@ -1613,7 +1648,7 @@ def interactive_packages(installer: 'Installer', log: LogFile, logo_animation):
             log.info("[MOCK] Base packages installed.")
         if choice in ['d','a']:
             log.info("[MOCK] Desktop packages installed.")
-        input_with_pause("Press Enter to continue...", logo_animation)
+         
         return
 
     if choice in ['b','a']:
@@ -1625,7 +1660,7 @@ def interactive_packages(installer: 'Installer', log: LogFile, logo_animation):
     if choice in ['d','a']:
         installer.add_additional_packages(DESKTOP_PACKAGES)
         log.info("Desktop packages installed.")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_services(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Services Setup ===")
@@ -1639,7 +1674,7 @@ def interactive_services(installer: 'Installer', log: LogFile, logo_animation):
                 log.info(f"Service enabled: {svc}")
         else:
             log.info(f"Service skipped: {svc}")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_timezone(installer: 'Installer', log: LogFile, logo_animation):
     tz = input_with_pause("Set timezone (default America/New_York): ", logo_animation).strip()
@@ -1654,7 +1689,7 @@ def interactive_timezone(installer: 'Installer', log: LogFile, logo_animation):
         installer.activate_time_synchronization()
         print(f"Timezone set to {tz}")
         log.info(f"Timezone set to {tz}")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_wifi(installer: 'Installer', log: LogFile, logo_animation):
     run_command("nmcli radio wifi on", log)
@@ -1687,7 +1722,7 @@ def interactive_wifi(installer: 'Installer', log: LogFile, logo_animation):
     else:
         log.info("No Wi-Fi networks found.")
         print("WIFI REQUIRED , REBOOT TO TAKE EFFECT")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_bootloader(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Bootloader Setup ===")
@@ -1714,7 +1749,7 @@ def interactive_bootloader(installer: 'Installer', log: LogFile, logo_animation)
     except:
         print("Invalid choice, skipping bootloader setup.")
         log.error("Bootloader setup failed or skipped.")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_custom_commands(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Run Custom NARCHS Scripts ===")
@@ -1725,7 +1760,7 @@ def interactive_custom_commands(installer: 'Installer', log: LogFile, logo_anima
             log.info(f"Ran custom command: {cmd}")
         else:
             log.info(f"Skipped custom command: {cmd}")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_format_partition(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Format Partition ===")
@@ -1775,7 +1810,7 @@ def interactive_format_partition(installer: 'Installer', log: LogFile, logo_anim
     except ValueError:
         print("Invalid input, skipping formatting.")
         log.error("Invalid input for partition formatting.")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def interactive_find_mirrors(installer: 'Installer', log: LogFile, logo_animation):
     print("\n=== Find Fastest Mirrors ===")
@@ -1792,7 +1827,7 @@ def interactive_find_mirrors(installer: 'Installer', log: LogFile, logo_animatio
         log.info("Fastest mirrors configured.")
     except Exception as e:
         log.error(f"Failed to update mirrors: {e}")
-    input_with_pause("Press Enter to continue...", logo_animation)
+     
 
 def setup_login_ui(installer: 'Installer', log: LogFile):
     """Install and enable a GTK-based login UI (LightDM + GTK greeter)."""

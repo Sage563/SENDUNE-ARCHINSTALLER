@@ -134,7 +134,7 @@ DOCKERFILE
 
 iso_name="${ISO_NAME,,}"
 iso_label="${ISO_NAME^^}"
-iso_publisher="SENDUNE <https://sendune.org>"
+iso_publisher="SENDUNE <https://github.com/Sage563/SENDUNE-ARCHINSTALLER>"
 iso_application="SENDUNE Live/Rescue System"
 iso_version="\$(date +%Y.%m.%d)"
 install_dir="sendune"
@@ -193,7 +193,6 @@ usbutils
 lshw
 
 # Disk utilities
-parted
 gptfdisk
 hdparm
 
@@ -210,6 +209,7 @@ python
 python-pip
 python-setuptools
 python-wheel
+archinstall
 EOF
 
     # Create pacman.conf
@@ -368,7 +368,7 @@ EOF
 Welcome to SENDUNE Live Environment!
 
 Installer location: /root/SENDUNE_installer
-To install SENDUNE: cd /root/SENDUNE_installer && ./install.sh
+To install SENDUNE: sendune-installer
 
 EOF
 
@@ -401,9 +401,6 @@ echo "  To install SENDUNE, run:"
 echo ""
 echo "    sendune-installer"
 echo ""
-echo "  Or manually:"
-echo "    cd /root/SENDUNE_installer && python -m SENDUNE_installer"
-echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 EOF
@@ -429,19 +426,44 @@ echo "[2/6] Injecting SENDUNE installer..."
 cp -r /build/installer /build/sendune_profile/airootfs/root/SENDUNE_installer
 find /build/sendune_profile/airootfs/root/SENDUNE_installer -type f -name "*.sh" -exec chmod +x {} \;
 
+# Pre-install dependencies via pip directly into airootfs
+echo "[2.1/6] Pre-installing Python dependencies into ISO..."
+PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+SITE_PACKAGES="/build/sendune_profile/airootfs/usr/lib/python${PYTHON_VERSION}/site-packages"
+mkdir -p "$SITE_PACKAGES"
+
+echo "  → Installing archinstall, pydantic, pyparted..."
+python3 -m pip install --upgrade pip 2>/dev/null || true
+python3 -m pip install \
+    --target "$SITE_PACKAGES" \
+    archinstall pydantic pyparted \
+    --no-cache-dir 2>/dev/null || {
+        echo "  ⚠ Pip installation failed, dependencies may be missing at runtime!"
+    }
+
 # Build Python wheel if setup.py or pyproject.toml exists
-echo "[2.1/6] Building SENDUNE installer as Python package..."
+echo "[2.2/6] Building SENDUNE installer package..."
 if [ -f /build/sendune_profile/airootfs/root/SENDUNE_installer/setup.py ] || \
    [ -f /build/sendune_profile/airootfs/root/SENDUNE_installer/pyproject.toml ]; then
 
     cd /build/sendune_profile/airootfs/root/SENDUNE_installer
 
-    # Build wheel
-    echo "  → Building Python wheel package..."
-    python -m pip install --upgrade pip wheel setuptools 2>/dev/null || true
-    python -m pip wheel . --no-deps -w /tmp/sendune_wheels 2>/dev/null || {
-        echo "  ⚠ Wheel build failed, will install from source"
+    # Build wheel and also install it to site-packages for immediate availability
+    echo "  → Building and pre-installing SENDUNE wheel..."
+    mkdir -p /tmp/sendune_wheels
+    python3 -m pip wheel . --no-deps -w /tmp/sendune_wheels 2>/dev/null || true
+    python3 -m pip install . --target "$SITE_PACKAGES" --no-deps 2>/dev/null || {
+        echo "  ⚠ Failed to pre-install SENDUNE package, will run from source"
     }
+
+    # Bundle wheels for offline recovery
+    echo "  → Bundling wheels for offline recovery..."
+    mkdir -p /build/sendune_profile/airootfs/root/SENDUNE_wheels
+    cp /tmp/sendune_wheels/*.whl /build/sendune_profile/airootfs/root/SENDUNE_wheels/ 2>/dev/null || true
+    
+    # Download dependency wheels for offline access
+    echo "  → Downloading dependency wheels for offline access..."
+    python3 -m pip download archinstall pydantic pyparted -d /build/sendune_profile/airootfs/root/SENDUNE_wheels/ 2>/dev/null || true
 
     # Create installer script that will be available in PATH
     echo "  → Creating sendune-installer command..."
@@ -449,21 +471,36 @@ if [ -f /build/sendune_profile/airootfs/root/SENDUNE_installer/setup.py ] || \
     cat > /build/sendune_profile/airootfs/usr/local/bin/sendune-installer <<'INSTALLER_SCRIPT'
 #!/bin/bash
 # SENDUNE Installer Wrapper
-cd /root/SENDUNE_installer
+set -e
 
-# Try to install from wheel first, then fallback to source
-if [ -d /tmp/sendune_wheels ] && [ -n "$(ls -A /tmp/sendune_wheels/*.whl 2>/dev/null)" ]; then
-    echo "Installing SENDUNE from wheel package..."
-    pip install --user /tmp/sendune_wheels/*.whl 2>/dev/null || {
-        echo "Wheel installation failed, running from source..."
-        python -m SENDUNE_installer "$@"
-        exit $?
-    }
-    # Run the installed command
-    sendune-runner "$@"
+# Core check
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found. Cannot start installer." >&2
+    exit 1
+fi
+
+# The pre-installed packages should be in standard site-packages
+# but we add them to PYTHONPATH just in case of non-standard build paths
+export PYTHONPATH=$PYTHONPATH:/usr/lib/python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages
+
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "⚠ archinstall module missing from site-packages, attempting to install from local wheels..."
+    if [ -d /root/SENDUNE_wheels ]; then
+        pip install --no-index --find-links=/root/SENDUNE_wheels archinstall pydantic pyparted 2>/dev/null || true
+    fi
+fi
+
+# Final check
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "ERROR: archinstall module not found." >&2
+    exit 1
+fi
+
+# Run the installer
+if command -v senduneinstaller &>/dev/null; then
+    senduneinstaller "$@"
 else
-    # Run from source
-    python -m SENDUNE_installer "$@"
+    cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
 fi
 INSTALLER_SCRIPT
     chmod +x /build/sendune_profile/airootfs/usr/local/bin/sendune-installer
@@ -471,11 +508,16 @@ INSTALLER_SCRIPT
 
     cd /build
 else
-    echo "  ⚠ No setup.py or pyproject.toml found, creating simple launcher..."
+    echo "  ⚠ No setup.py found, creating simple launcher..."
     mkdir -p /build/sendune_profile/airootfs/usr/local/bin
     cat > /build/sendune_profile/airootfs/usr/local/bin/sendune-installer <<'SIMPLE_SCRIPT'
 #!/bin/bash
-cd /root/SENDUNE_installer && python -m SENDUNE_installer "$@"
+set -e
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "ERROR: archinstall module missing." >&2
+    exit 1
+fi
+cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
 SIMPLE_SCRIPT
     chmod +x /build/sendune_profile/airootfs/usr/local/bin/sendune-installer
 fi
@@ -483,12 +525,12 @@ fi
 # Copy splash image if exists
 WALLPAPER_PATH="/build/sendune_profile/airootfs/root/SENDUNE_installer/assets/sendune_wallpaper.png"
 if [ -f "$WALLPAPER_PATH" ]; then
-    echo "  → Copying SENDUNE splash image for boot menu..."
+    echo "[2.3/6] Processing SENDUNE splash image..."
     mkdir -p /build/sendune_profile/syslinux
 
     # Convert PNG to proper format and resolution for syslinux (640x480, 16 colors)
     if command -v convert &> /dev/null; then
-        echo "  → Converting image to syslinux format (640x480, 16 colors)..."
+        echo "  → Converting image to syslinux format..."
         convert "$WALLPAPER_PATH" -resize 640x480 -colors 16 /build/sendune_profile/syslinux/splash.png 2>/dev/null || {
             echo "  ⚠ Conversion failed, copying original..."
             cp "$WALLPAPER_PATH" /build/sendune_profile/syslinux/splash.png
@@ -500,20 +542,17 @@ if [ -f "$WALLPAPER_PATH" ]; then
 
     # Verify splash image was created
     if [ -f /build/sendune_profile/syslinux/splash.png ]; then
-        echo "  ✓ Splash image ready: $(du -h /build/sendune_profile/syslinux/splash.png | cut -f1)"
-        # Add background to syslinux config
-        sed -i '/MENU TITLE SENDUNE Live Environment/a MENU BACKGROUND splash.png' /build/sendune_profile/syslinux/archiso.cfg
-    else
-        echo "  ✗ Failed to create splash.png"
+        echo "  ✓ Splash image ready"
+        # Add background to syslinux config if not already there
+        if ! grep -q "MENU BACKGROUND splash.png" /build/sendune_profile/syslinux/archiso.cfg; then
+            sed -i '/MENU TITLE SENDUNE Live Environment/a MENU BACKGROUND splash.png' /build/sendune_profile/syslinux/archiso.cfg
+        fi
     fi
-else
-    echo "  ⚠ Warning: sendune_wallpaper.png not found at $WALLPAPER_PATH"
-    echo "  → Boot menu will use default styling"
 fi
 
 # Validate profile
 echo "[3/6] Validating profile structure..."
-ls -la /build/sendune_profile/
+# ls -la /build/sendune_profile/
 
 # Create work directory with proper permissions
 echo "[4/6] Creating work directories..."
@@ -671,6 +710,7 @@ python
 python-pip
 python-setuptools
 python-wheel
+archinstall
 EOF
 
     # Create pacman.conf
@@ -832,9 +872,6 @@ echo "  To install SENDUNE, run:"
 echo ""
 echo "    sendune-installer"
 echo ""
-echo "  Or manually:"
-echo "    cd /root/SENDUNE_installer && python -m SENDUNE_installer"
-echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 EOF
@@ -845,23 +882,40 @@ EOF
     cp -r "$INSTALLER_DIR" "$PROFILE_DIR/airootfs/root/SENDUNE_installer"
     find "$PROFILE_DIR/airootfs/root/SENDUNE_installer" -type f -name "*.sh" -exec chmod +x {} \;
 
+    # Pre-install dependencies via pip directly into airootfs
+    info "Pre-installing Python dependencies into ISO..."
+    PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
+    SITE_PACKAGES="$PROFILE_DIR/airootfs/usr/lib/python${PYTHON_VERSION}/site-packages"
+    mkdir -p "$SITE_PACKAGES"
+
+    info "Installing archinstall, pydantic, pyparted via pip..."
+    python3 -m pip install --upgrade pip 2>/dev/null || true
+    python3 -m pip install \
+        --target "$SITE_PACKAGES" \
+        archinstall pydantic pyparted \
+        --no-cache-dir 2>/dev/null || {
+            warn "Pip installation failed, dependencies may be missing!"
+        }
+
     # Build Python wheel if setup.py or pyproject.toml exists
     info "Setting up SENDUNE installer package..."
     if [ -f "$INSTALLER_DIR/setup.py" ] || [ -f "$INSTALLER_DIR/pyproject.toml" ]; then
-        info "Building Python wheel package..."
+        info "Building and pre-installing SENDUNE wheel..."
 
         # Build wheel in temporary directory
         WHEEL_DIR=$(mktemp -d)
         cd "$INSTALLER_DIR"
-        python -m pip install --upgrade pip wheel setuptools 2>/dev/null || true
-        if python -m pip wheel . --no-deps -w "$WHEEL_DIR" 2>/dev/null; then
-            # Copy wheel to ISO
-            mkdir -p "$PROFILE_DIR/airootfs/tmp/sendune_wheels"
-            cp "$WHEEL_DIR"/*.whl "$PROFILE_DIR/airootfs/tmp/sendune_wheels/" 2>/dev/null || true
-            success "Wheel package built successfully"
-        else
-            warn "Wheel build failed, will install from source"
-        fi
+        python3 -m pip wheel . --no-deps -w "$WHEEL_DIR" 2>/dev/null || true
+        python3 -m pip install . --target "$SITE_PACKAGES" --no-deps 2>/dev/null || true
+        
+        # Bundle wheels for offline recovery
+        mkdir -p "$PROFILE_DIR/airootfs/root/SENDUNE_wheels"
+        cp "$WHEEL_DIR"/*.whl "$PROFILE_DIR/airootfs/root/SENDUNE_wheels/" 2>/dev/null || true
+        
+        # Download dependency wheels
+        info "Downloading dependency wheels for offline access..."
+        python3 -m pip download archinstall pydantic pyparted -d "$PROFILE_DIR/airootfs/root/SENDUNE_wheels/" 2>/dev/null || true
+        
         rm -rf "$WHEEL_DIR"
         cd - >/dev/null
     fi
@@ -874,27 +928,46 @@ EOF
         cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer" <<'INSTALLER_SCRIPT'
 #!/bin/bash
 # SENDUNE Installer Wrapper
-cd /root/SENDUNE_installer
+set -e
 
-# Try to install from wheel first, then fallback to source
-if [ -d /tmp/sendune_wheels ] && [ -n "$(ls -A /tmp/sendune_wheels/*.whl 2>/dev/null)" ]; then
-    echo "Installing SENDUNE from wheel package..."
-    pip install --user /tmp/sendune_wheels/*.whl 2>/dev/null || {
-        echo "Wheel installation failed, running from source..."
-        python -m SENDUNE_installer "$@"
-        exit $?
-    }
-    # Run the installed command
-    sendune-runner "$@"
+# Core check
+if ! command -v python3 &>/dev/null; then
+    echo "ERROR: python3 not found. Cannot start installer." >&2
+    exit 1
+fi
+
+# Ensure site-packages is in path
+export PYTHONPATH=$PYTHONPATH:/usr/lib/python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages
+
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "⚠ archinstall module missing, attempting local wheel install..."
+    if [ -d /root/SENDUNE_wheels ]; then
+        pip install --no-index --find-links=/root/SENDUNE_wheels archinstall pydantic pyparted 2>/dev/null || true
+    fi
+fi
+
+# Final check
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "ERROR: archinstall module not found." >&2
+    exit 1
+fi
+
+# Run the installer
+if command -v senduneinstaller &>/dev/null; then
+    senduneinstaller "$@"
 else
-    # Run from source
-    python -m SENDUNE_installer "$@"
+    cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
 fi
 INSTALLER_SCRIPT
     else
         cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer" <<'SIMPLE_SCRIPT'
 #!/bin/bash
-cd /root/SENDUNE_installer && python -m SENDUNE_installer "$@"
+set -e
+if ! python3 -c "import archinstall" &>/dev/null; then
+    echo "ERROR: archinstall module missing." >&2
+    exit 1
+fi
+cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
 SIMPLE_SCRIPT
     fi
 

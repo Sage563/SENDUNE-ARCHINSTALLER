@@ -51,6 +51,7 @@ class RGB3DLogo:
         self._pause_event = threading.Event()
         self._pause_event.set()  # not paused by default
         self._thread = None
+        self._lock = threading.Lock()
 
     def _rgb(self, r, g, b, bold=False):
         code = f"\033[38;2;{r};{g};{b}m"
@@ -77,28 +78,28 @@ class RGB3DLogo:
         return start_col, result
 
     def _print_logo(self):
-        cols = shutil.get_terminal_size((80, 20)).columns
-        for i, line in enumerate(self.logo):
-            # clear the full target line first so previous frames don't leave artifacts
-            sys.stdout.write(f"\033[{self.top + i};1H\033[K")
-            start_col, painted = self._carving_text(line, self._shift + i)
-            sys.stdout.write(f"\033[{self.top + i};{start_col}H")
-            try:
-                sys.stdout.write(painted)
-            except UnicodeEncodeError:
-                # If terminal can't handle unicode, strip colors/fancy chars or just print simple
-                # For now, simplistic fallback: replace block chars with #
-                safe_painted = painted.encode('ascii', errors='replace').decode('ascii')
-                # But 'painted' has color codes. We might just suppress or try to print safe version.
-                # Actually, the error is likely the block characters.
-                # Let's try to reconfigure stdout once in __init__? 
-                # Doing it here is safer for a quick patch:
+        with self._lock:
+            # Save cursor position
+            sys.stdout.write("\033[s")
+            
+            cols = shutil.get_terminal_size((80, 20)).columns
+            for i, line in enumerate(self.logo):
+                # clear the target line
+                sys.stdout.write(f"\033[{self.top + i};1H\033[K")
+                start_col, painted = self._carving_text(line, self._shift + i)
+                sys.stdout.write(f"\033[{self.top + i};{start_col}H")
                 try:
-                     sys.stdout.reconfigure(encoding='utf-8')
-                     sys.stdout.write(painted)
-                except Exception:
-                     pass # Give up on this frame if still failing
-        sys.stdout.flush()
+                    sys.stdout.write(painted)
+                except UnicodeEncodeError:
+                    try:
+                        sys.stdout.reconfigure(encoding='utf-8')
+                        sys.stdout.write(painted)
+                    except Exception:
+                        pass
+            
+            # Restore cursor position
+            sys.stdout.write("\033[u")
+            sys.stdout.flush()
 
     def _run_loop(self):
         while not self._stop_event.is_set():
@@ -139,20 +140,31 @@ class RGB3DLogo:
         self._pause_event.set()
         if self._thread:
             self._thread.join(timeout=1)
-        # Reset color and move cursor below logo
-        sys.stdout.write("\033[0m\n")
+        # Reset scroll region and color, then move cursor below logo
+        sys.stdout.write("\033[r\033[0m\n")
         sys.stdout.flush()
+
+    def set_scroll_region(self, top=8):
+        """Sets the terminal scroll region to start below the logo."""
+        with self._lock:
+            rows = shutil.get_terminal_size((80, 24)).lines
+            sys.stdout.write(f"\033[{top};{rows}r")
+            sys.stdout.write(f"\033[{top};1H")
+            sys.stdout.flush()
+
+    def reset_scroll_region(self):
+        """Resets the terminal scroll region to full screen."""
+        with self._lock:
+            sys.stdout.write("\033[r")
+            sys.stdout.flush()
 
 
 def input_with_pause(prompt, logo_animation):
     """Pauses the logo animation, takes input, then resumes animation."""
     logo_animation.pause()
     try:
-        # Move cursor below the logo to avoid overwriting; place prompt at column 1
-        import shutil
-        size = shutil.get_terminal_size((80, 24))
-        rows = size.lines
-        sys.stdout.write(f"\033[{rows};1H\033[K")
+        # Just use standard input() but ensure color is reset
+        sys.stdout.write("\033[0m")
         sys.stdout.flush()
         return input(prompt)
     finally:
