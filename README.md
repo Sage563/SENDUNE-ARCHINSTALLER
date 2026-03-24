@@ -1,4 +1,4 @@
-# 🌐 SENDUNE Linux
+# SENDUNE Linux
 
 **A Modern Arch-Based Linux Distribution**
 
@@ -10,18 +10,18 @@ SENDUNE Linux is a modern, user-friendly Linux distribution based on Arch Linux.
 
 ![SENDUNE Logo](SENDUNE_installer/assets/sendune_wallpaper.png)
 
-## ✨ Features
+## Features
 
-- 🚀 **Easy Installation** - Guided installer with intelligent defaults and animated UI
-- 📦 **Comprehensive Software** - Extensive package selection for all use cases
-- 🎮 **Gaming Optimized** - Steam integration and gaming performance tuning
-- 💻 **Developer Focused** - Complete development stacks for every programming language
-- 🔒 **Security First** - Built-in security features and automated hardening
-- 🎨 **Beautiful UI** - Hyprland desktop with custom themes and wallpapers
+- **Easy Installation** - Guided installer with intelligent defaults and animated UI
+- **Comprehensive Software** - Extensive package selection for all use cases
+- **Gaming Optimized** - Steam integration and gaming performance tuning
+- **Developer Focused** - Complete development stacks for every programming language
+- **Security First** - Built-in security features and automated hardening
+- **Beautiful UI** - Hyprland desktop with custom themes and wallpapers
 
 ---
 
-## 🏗️ Building the ISO
+## Building the ISO
 
 ### Quick Start
 
@@ -68,7 +68,7 @@ The ISO is built to `./out-iso/SENDUNE.iso` by default. This includes:
 
 ---
 
-## 🖥️ Running the Installer
+## Running the Installer
 
 ### On Live ISO
 
@@ -90,7 +90,7 @@ python -m SENDUNE_installer
 
 ---
 
-## 🎨 Desktop Environments
+## Desktop Environments
 
 | Desktop | Description |
 |---------|-------------|
@@ -104,14 +104,14 @@ python -m SENDUNE_installer
 
 ---
 
-## 🛠️ Installation Features
+## Installation Features
 
 ### Core Features
-- 🖥️ Desktop environments (9 options)
-- 🎮 Graphics drivers (NVIDIA, AMD, Intel, VirtualBox, VMware)
-- 👤 User account creation with sudo access
-- 🌐 Network configuration (WiFi, Ethernet)
-- 🔧 Bootloader installation (GRUB, systemd-boot)
+- Desktop environments (9 options)
+- Graphics drivers (NVIDIA, AMD, Intel, VirtualBox, VMware)
+- User account creation with sudo access
+- Network configuration (WiFi, Ethernet)
+- Bootloader installation (GRUB, systemd-boot)
 
 ### Development Tools
 - **Languages**: Python, JavaScript, Java, C/C++, Ruby, PHP, Go, Rust
@@ -120,11 +120,11 @@ python -m SENDUNE_installer
 - **Containers**: Docker, Podman, Docker Compose
 
 ### Security Features
-- 🔥 Firewall (UFW)
-- 🛡️ AppArmor / SELinux
-- 🚫 Fail2Ban intrusion prevention
-- 🦠 ClamAV antivirus
-- 🔐 Audit framework
+- Firewall (UFW)
+- AppArmor / SELinux
+- Fail2Ban intrusion prevention
+- ClamAV antivirus
+- Audit framework
 
 ### System Utilities
 - Archive tools, file managers, terminal emulators
@@ -138,7 +138,7 @@ python -m SENDUNE_installer
 
 ---
 
-## 📦 Package Management with Flip
+## Package Management with Flip
 
 SENDUNE includes `flip` - a user-friendly package manager wrapper:
 
@@ -166,24 +166,24 @@ yay -Ss <query>     # Search AUR
 
 ---
 
-## 🤖 AI-Powered Features
+## AI-Powered Features
 
 SENDUNE includes an AI Installation Assistant that recommends configurations based on your use case:
 
 | Profile | Best For |
 |---------|----------|
-| 🎮 Gaming PC | Steam, Lutris, Proton, performance tuning |
-| 💻 Developer Workstation | IDEs, containers, databases |
-| 🎨 Creative Studio | GIMP, Blender, Kdenlive, audio production |
-| 📊 Office/Productivity | LibreOffice, browsers, cloud storage |
-| 📺 Media Center | Kodi, Plex, streaming apps |
-| 🖥️ Server/NAS | Docker, Nginx, databases, SSH |
-| 🔒 Privacy-Focused | Tor, VPN, encryption tools |
-| 📚 Educational | Jupyter, R, scientific tools |
+| Gaming PC | Steam, Lutris, Proton, performance tuning |
+| Developer Workstation | IDEs, containers, databases |
+| Creative Studio | GIMP, Blender, Kdenlive, audio production |
+| Office/Productivity | LibreOffice, browsers, cloud storage |
+| Media Center | Kodi, Plex, streaming apps |
+| Server/NAS | Docker, Nginx, databases, SSH |
+| Privacy-Focused | Tor, VPN, encryption tools |
+| Educational | Jupyter, R, scientific tools |
 
 ---
 
-## 📊 Configuration Scoring
+## Configuration Scoring
 
 After installation, SENDUNE provides a configuration score:
 
@@ -202,7 +202,7 @@ After installation, SENDUNE provides a configuration score:
 
 ---
 
-## 🚀 Quick Installation Steps
+## Quick Installation Steps
 
 1. **Build the ISO**:
    ```bash
@@ -222,7 +222,7 @@ After installation, SENDUNE provides a configuration score:
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 SENDUNE-ARCHINSTALLER/
@@ -242,7 +242,7 @@ SENDUNE-ARCHINSTALLER/
 
 ---
 
-## 🔧 Testing the ISO
+## Testing the ISO
 
 After building, test with QEMU:
 
@@ -258,16 +258,16 @@ sudo dd if=out-iso/SENDUNE.iso of=/dev/sdX bs=4M status=progress
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 Contributions are welcome! Please feel free to submit issues and pull requests.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the GPL v3 License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-**Built with ❤️ by the SENDUNE Linux team**
+**Built by the SENDUNE Linux team**

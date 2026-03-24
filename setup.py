@@ -12,6 +12,8 @@ setup(
     entry_points={
         "console_scripts": [
             "senduneinstaller = SENDUNE_installer.__main__:run_as_module",
+            "sendune_installer = SENDUNE_installer.__main__:run_as_module",
+            "sendune-installer = SENDUNE_installer.__main__:run_as_module",
         ],
     },
     install_requires=[

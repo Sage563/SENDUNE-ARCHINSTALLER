@@ -112,7 +112,7 @@ def install_external_dotfiles(user_home: Path, log: LogFile, mount_point: Path):
     repo_in_chroot = projects_in_chroot / "dotfiles"
     
     log.info(f"Starting automated ML4W dotfiles cloning for {username}")
-    print(f"\n🚀 Cloning ML4W dotfiles for {username}...")
+    print(f"\n Cloning ML4W dotfiles for {username}...")
     
     try:
         if MOCK_MODE:
@@ -150,8 +150,8 @@ def install_external_dotfiles(user_home: Path, log: LogFile, mount_point: Path):
                 log.warn(f"Failed to chown Projects via chroot: {e}")
 
         log.info("External dotfiles cloned (setup deferred to first login).")
-        print("✓ ML4W dotfiles cloned. Setup will run on first login.")
+        print("ML4W dotfiles cloned. Setup will run on first login.")
             
     except Exception as e:
         log.error(f"Failed to setup external dotfiles: {e}")
-        print(f"❌ Failed to setup dotfiles: {e}")
+        print(f" Failed to setup dotfiles: {e}")

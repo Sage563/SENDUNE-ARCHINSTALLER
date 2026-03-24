@@ -118,10 +118,10 @@ def ensure_archinstall_available(log: LogFile = None):
 DEFAULT_USER = User('narchs', 'Narchs123!', True)
 
 BASE_PACKAGES = [
-    'base', 'linux', 'linux-firmware', 'vim', 'sudo', 'git', 'bash-completion',
+    'base', 'linux', 'linux-firmware', 'vim', 'nano', 'sudo', 'git', 'bash-completion',
     'networkmanager', 'openssh', 'bluez', 'bluez-utils', 'pulseaudio', 'htop',
     'neofetch', 'zsh', 'curl', 'wget', 'docker', 'python', 'python-pip',
-    'nodejs', 'npm', 'firefox', 'chromium', 'code'
+    'nodejs', 'npm', 'firefox', 'chromium', 'code', 'go', "gcc", "base-devel",
 ]
 
 DESKTOP_PACKAGES = ['xfce4', 'xfce4-goodies', 'lightdm', 'lightdm-gtk-greeter']
@@ -283,6 +283,7 @@ def interactive_desktop_environment(installer: 'Installer', log: LogFile, logo_a
             # Remove existing desktop packages and add new ones
             global DESKTOP_PACKAGES
             DESKTOP_PACKAGES = packages
+            installer.desktop_packages = list(packages)
             installer.add_additional_packages(packages)
             log.info(f"Desktop environment installed: {name} - {packages}")
             
@@ -299,8 +300,7 @@ def interactive_desktop_environment(installer: 'Installer', log: LogFile, logo_a
 def interactive_locale_setup(installer: 'Installer', log: LogFile, logo_animation):
     """Configure system locale and language."""
     print("\n=== Locale and Language Setup ===")
-    
-    # Common locales
+
     locales = {
         '1': ('en_US.UTF-8', 'English (US)'),
         '2': ('en_GB.UTF-8', 'English (UK)'),
@@ -315,6 +315,20 @@ def interactive_locale_setup(installer: 'Installer', log: LogFile, logo_animatio
         '11': ('ko_KR.UTF-8', 'Korean'),
         '12': ('ar_SA.UTF-8', 'Arabic (Saudi Arabia)'),
         '13': ('hi_IN.UTF-8', 'Hindi (India)'),
+        '14': ('custom', 'Custom locale'),
+        '0': ('Skip', '')
+    }
+
+    keymaps = {
+        '1': ('us', 'US'),
+        '2': ('uk', 'United Kingdom'),
+        '3': ('de', 'German'),
+        '4': ('fr', 'French'),
+        '5': ('es', 'Spanish'),
+        '6': ('it', 'Italian'),
+        '7': ('br-abnt2', 'Brazilian ABNT2'),
+        '8': ('jp106', 'Japanese'),
+        '9': ('custom', 'Custom keymap'),
         '0': ('Skip', '')
     }
     
@@ -325,15 +339,34 @@ def interactive_locale_setup(installer: 'Installer', log: LogFile, logo_animatio
     choice = input_with_pause("Select system locale (0 to skip): ", logo_animation).strip()
     if choice in locales and choice != '0':
         locale_code, name = locales[choice]
+        if locale_code == 'custom':
+            locale_code = input_with_pause("Enter locale code (example: en_US.UTF-8): ", logo_animation).strip()
+            name = f"Custom ({locale_code})"
         if MOCK_MODE:
             log.info(f"[MOCK] Would set locale to: {locale_code} ({name})")
             print(f"[MOCK] Locale selected: {name}")
         else:
-            # Generate locale
-            run_command(f"echo '{locale_code} UTF-8' >> /etc/locale.gen", log)
-            run_command("locale-gen", log)
-            run_command(f"echo 'LANG={locale_code}' > /etc/locale.conf", log)
-            log.info(f"Locale set to: {locale_code} ({name})")
+            installer.selected_locale = locale_code
+            log.info(f"Locale selected for target system: {locale_code} ({name})")
+            print(f"Locale selected: {name}")
+
+    print("\nAvailable keyboard layouts:")
+    for key, (keymap, name) in keymaps.items():
+        print(f"{key}. {name} ({keymap})")
+
+    keymap_choice = input_with_pause("Select keyboard layout (0 to keep default us): ", logo_animation).strip()
+    if keymap_choice in keymaps and keymap_choice != '0':
+        keymap_code, keymap_name = keymaps[keymap_choice]
+        if keymap_code == 'custom':
+            keymap_code = input_with_pause("Enter keymap (example: us, de, fr): ", logo_animation).strip()
+            keymap_name = f"Custom ({keymap_code})"
+        if MOCK_MODE:
+            log.info(f"[MOCK] Would set keymap to: {keymap_code} ({keymap_name})")
+            print(f"[MOCK] Keyboard layout selected: {keymap_name}")
+        else:
+            installer.selected_keymap = keymap_code
+            log.info(f"Keyboard layout selected for target system: {keymap_code} ({keymap_name})")
+            print(f"Keyboard layout selected: {keymap_name}")
 
 def interactive_login_manager(installer: 'Installer', log: LogFile, logo_animation):
     """Choose and configure login manager/display manager."""
@@ -576,6 +609,44 @@ def interactive_system_automation(installer: 'Installer', log: LogFile, logo_ani
                 if choice.strip() in service_map:
                     installer.enable_service(service_map[choice.strip()])
 
+def interactive_audio_setup(installer: 'Installer', log: LogFile, logo_animation):
+    """Select the Linux audio stack."""
+    print("\n=== Audio Setup ===")
+    options = {
+        '1': ('PipeWire (Recommended)', ['pipewire', 'wireplumber', 'pipewire-pulse', 'pipewire-alsa', 'pipewire-jack', 'alsa-utils', 'pavucontrol']),
+        '2': ('PulseAudio (Legacy)', ['pulseaudio', 'pulseaudio-alsa', 'alsa-utils', 'pavucontrol']),
+        '3': ('ALSA Only', ['alsa-utils', 'alsa-plugins', 'alsa-lib']),
+        '4': ('Pro Audio / JACK', ['pipewire', 'wireplumber', 'pipewire-jack', 'qjackctl', 'helvum', 'alsa-utils']),
+        '5': ('Add Bluetooth Audio Support', ['bluez', 'bluez-utils']),
+        '0': ('Skip', [])
+    }
+
+    print("Available audio options:")
+    for key, (name, _) in options.items():
+        print(f"{key}. {name}")
+    print("You can enter multiple choices separated by commas")
+
+    choices = input_with_pause("Select audio options (comma-separated, 0 to skip): ", logo_animation).strip().split(',')
+    selected_packages = set()
+    selected_names = []
+
+    for choice in choices:
+        choice = choice.strip()
+        if choice in options and choice != '0':
+            name, packages = options[choice]
+            selected_packages.update(packages)
+            selected_names.append(name)
+        elif choice == '0':
+            break
+
+    if selected_packages:
+        if MOCK_MODE:
+            log.info(f"[MOCK] Would install audio stack: {selected_names} - {list(selected_packages)}")
+            print(f"[MOCK] Audio setup selected: {', '.join(selected_names)}")
+        else:
+            installer.add_additional_packages(list(selected_packages))
+            log.info(f"Audio setup selected: {selected_names} - {list(selected_packages)}")
+
 def interactive_multimedia_tools(installer: 'Installer', log: LogFile, logo_animation):
     """Select multimedia tools and codecs."""
     print("\n=== Multimedia Tools ===")
@@ -621,11 +692,11 @@ def interactive_multimedia_tools(installer: 'Installer', log: LogFile, logo_anim
 
 def interactive_ai_assistant(installer: 'Installer', log: LogFile, logo_animation):
     """AI-powered installation assistant with intelligent recommendations."""
-    print("\n🤖 === AI Installation Assistant ===")
+    print("\n === AI Installation Assistant ===")
     print("Let me help you create the perfect system configuration!")
     
     # Hardware detection
-    print("\n🔍 Detecting your hardware...")
+    print("\n Detecting your hardware...")
     hardware_info = detect_hardware()
     
     # Usage profile selection
@@ -642,7 +713,7 @@ def interactive_ai_assistant(installer: 'Installer', log: LogFile, logo_animatio
         '10': ('Custom (Manual Selection)', 'custom')
     }
     
-    print("\n🎯 Choose your primary use case:")
+    print("\n Choose your primary use case:")
     for key, (name, _) in profiles.items():
         print(f"{key}. {name}")
     
@@ -799,7 +870,7 @@ def get_ai_recommendations(profile_type, hardware):
 
 def apply_recommendations(installer, recommendations, log, logo_animation):
     """Apply AI-generated recommendations to the installation."""
-    print(f"\n🎯 Applying {recommendations.get('profile', 'custom')} recommendations...")
+    print(f"\n Applying {recommendations.get('profile', 'custom')} recommendations...")
     
     # Set desktop environment
     if 'desktop' in recommendations and recommendations['desktop'] != 'none':
@@ -832,7 +903,7 @@ def apply_recommendations(installer, recommendations, log, logo_animation):
     if 'optimizations' in recommendations:
         apply_optimizations(installer, recommendations['optimizations'], log)
     
-    print("✅ AI recommendations applied successfully!")
+    print(" AI recommendations applied successfully!")
 
 def apply_optimizations(installer, optimizations, log):
     """Apply system optimizations based on recommendations."""
@@ -904,7 +975,7 @@ def apply_optimizations(installer, optimizations, log):
 
 def interactive_performance_tuning(installer: 'Installer', log: LogFile, logo_animation):
     """Advanced performance tuning options."""
-    print("\n⚡ === Performance Tuning ===")
+    print("\n === Performance Tuning ===")
     
     tuning_options = {
         '1': ('CPU Governor Optimization', 'cpu_governor'),
@@ -979,7 +1050,7 @@ def apply_performance_tunings(installer, tunings, log):
 
 def interactive_cloud_integration(installer: 'Installer', log: LogFile, logo_animation):
     """Cloud platform integration and deployment options."""
-    print("\n☁️ === Cloud Integration ===")
+    print("\n === Cloud Integration ===")
     
     cloud_options = {
         '1': ('AWS CLI & Tools', 'aws'),
@@ -1050,7 +1121,7 @@ def apply_cloud_integration(installer, clouds, log):
 
 def interactive_specialized_environments(installer: 'Installer', log: LogFile, logo_animation):
     """Specialized environment setups."""
-    print("\n🔬 === Specialized Environments ===")
+    print("\n === Specialized Environments ===")
     
     env_options = {
         '1': ('AI/ML Development Stack', 'ai_ml'),
@@ -1165,7 +1236,7 @@ def apply_specialized_environments(installer, environments, log):
 
 def interactive_system_health_monitoring(installer: 'Installer', log: LogFile, logo_animation):
     """System health monitoring and maintenance setup."""
-    print("\n🏥 === System Health Monitoring ===")
+    print("\n === System Health Monitoring ===")
     
     monitoring_options = {
         '1': ('System Monitoring (htop, nvtop)', 'system_monitor'),
@@ -1237,7 +1308,7 @@ def apply_system_monitoring(installer, monitoring, log):
 
 def calculate_system_score(installer, log):
     """Calculate and display a system configuration score with recommendations."""
-    print("\n📊 === System Configuration Score ===")
+    print("\n === System Configuration Score ===")
     
     score = 0
     max_score = 100
@@ -1246,117 +1317,117 @@ def calculate_system_score(installer, log):
     # Check desktop environment
     if hasattr(installer, 'desktop_packages') and installer.desktop_packages:
         score += 15
-        print("✅ Desktop Environment: Configured (+15 points)")
+        print(" Desktop Environment: Configured (+15 points)")
     else:
         recommendations.append("Consider adding a desktop environment for better usability")
-        print("⚠️  Desktop Environment: Not configured (0 points)")
+        print("  Desktop Environment: Not configured (0 points)")
     
     # Check graphics drivers
     graphics_packages = [pkg for pkg in installer.additional_packages if any(gpu in pkg.lower() for gpu in ['nvidia', 'amd', 'intel', 'mesa', 'vulkan'])]
     if graphics_packages:
         score += 15
-        print("✅ Graphics Drivers: Configured (+15 points)")
+        print(" Graphics Drivers: Configured (+15 points)")
     else:
         recommendations.append("Install graphics drivers for optimal display performance")
-        print("⚠️  Graphics Drivers: Not configured (0 points)")
+        print("  Graphics Drivers: Not configured (0 points)")
     
     # Check development tools
     dev_tools = [pkg for pkg in installer.additional_packages if any(dev in pkg.lower() for dev in ['gcc', 'python', 'nodejs', 'git', 'code', 'vim'])]
     if len(dev_tools) >= 3:
         score += 15
-        print("✅ Development Tools: Well configured (+15 points)")
+        print("Development Tools: Well configured (+15 points)")
     elif len(dev_tools) >= 1:
         score += 10
-        print("✅ Development Tools: Basic setup (+10 points)")
+        print(" Development Tools: Basic setup (+10 points)")
     else:
         recommendations.append("Consider installing development tools for software development")
-        print("⚠️  Development Tools: Not configured (0 points)")
+        print("  Development Tools: Not configured (0 points)")
     
     # Check security features
     security_tools = [pkg for pkg in installer.additional_packages if any(sec in pkg.lower() for sec in ['ufw', 'fail2ban', 'apparmor', 'clamav', 'firejail'])]
     if len(security_tools) >= 3:
         score += 15
-        print("✅ Security Features: Comprehensive (+15 points)")
+        print(" Security Features: Comprehensive (+15 points)")
     elif len(security_tools) >= 1:
         score += 10
-        print("✅ Security Features: Basic setup (+10 points)")
+        print(" Security Features: Basic setup (+10 points)")
     else:
         recommendations.append("Consider adding security tools for better system protection")
-        print("⚠️  Security Features: Not configured (0 points)")
+        print("  Security Features: Not configured (0 points)")
     
     # Check system utilities
     system_utils = [pkg for pkg in installer.additional_packages if any(util in pkg.lower() for util in ['htop', 'neofetch', 'tlp', 'lm_sensors', 'smartmontools'])]
     if len(system_utils) >= 3:
         score += 10
-        print("✅ System Utilities: Well configured (+10 points)")
+        print(" System Utilities: Well configured (+10 points)")
     elif len(system_utils) >= 1:
         score += 5
-        print("✅ System Utilities: Basic setup (+5 points)")
+        print(" System Utilities: Basic setup (+5 points)")
     else:
         recommendations.append("Consider installing system monitoring utilities")
-        print("⚠️  System Utilities: Not configured (0 points)")
+        print("  System Utilities: Not configured (0 points)")
     
     # Check network services
     network_services = [pkg for pkg in installer.additional_packages if any(net in pkg.lower() for net in ['openssh', 'networkmanager', 'bluez', 'samba', 'nfs'])]
     if len(network_services) >= 3:
         score += 10
-        print("✅ Network Services: Well configured (+10 points)")
+        print(" Network Services: Well configured (+10 points)")
     elif len(network_services) >= 1:
         score += 5
-        print("✅ Network Services: Basic setup (+5 points)")
+        print(" Network Services: Basic setup (+5 points)")
     else:
         recommendations.append("Consider configuring network services for connectivity")
-        print("⚠️  Network Services: Not configured (0 points)")
+        print("  Network Services: Not configured (0 points)")
     
     # Check multimedia support
     multimedia = [pkg for pkg in installer.additional_packages if any(media in pkg.lower() for media in ['vlc', 'mpv', 'gimp', 'ffmpeg', 'pulseaudio'])]
     if len(multimedia) >= 3:
         score += 10
-        print("✅ Multimedia Support: Well configured (+10 points)")
+        print("Multimedia Support: Well configured (+10 points)")
     elif len(multimedia) >= 1:
         score += 5
-        print("✅ Multimedia Support: Basic setup (+5 points)")
+        print(" Multimedia Support: Basic setup (+5 points)")
     else:
         recommendations.append("Consider installing multimedia tools for media playback and editing")
-        print("⚠️  Multimedia Support: Not configured (0 points)")
+        print("  Multimedia Support: Not configured (0 points)")
     
     # Check office/productivity
     office = [pkg for pkg in installer.additional_packages if any(off in pkg.lower() for off in ['libreoffice', 'thunderbird', 'firefox', 'evince'])]
     if len(office) >= 3:
         score += 10
-        print("✅ Office/Productivity: Well configured (+10 points)")
+        print(" Office/Productivity: Well configured (+10 points)")
     elif len(office) >= 1:
         score += 5
-        print("✅ Office/Productivity: Basic setup (+5 points)")
+        print("Office/Productivity: Basic setup (+5 points)")
     else:
         recommendations.append("Consider installing office and productivity applications")
-        print("⚠️  Office/Productivity: Not configured (0 points)")
+        print("  Office/Productivity: Not configured (0 points)")
     
     # Calculate grade
     percentage = (score / max_score) * 100
     
-    print(f"\n🏆 Final Score: {score}/{max_score} ({percentage:.1f}%)")
+    print(f"\n Final Score: {score}/{max_score} ({percentage:.1f}%)")
     
     if percentage >= 90:
-        print("🎉 Excellent! Your system is optimally configured!")
+        print(" Excellent! Your system is optimally configured!")
         grade = "A+"
     elif percentage >= 80:
-        print("✅ Great! Your system is well-configured with minor improvements possible.")
+        print("Great! Your system is well-configured with minor improvements possible.")
         grade = "A"
     elif percentage >= 70:
-        print("👍 Good! Your system has a solid foundation.")
+        print(" Good! Your system has a solid foundation.")
         grade = "B"
     elif percentage >= 60:
-        print("⚠️  Fair. Consider adding more features for better functionality.")
+        print("  Fair. Consider adding more features for better functionality.")
         grade = "C"
     else:
-        print("🔧 Basic. Your system needs more configuration for optimal use.")
+        print(" Basic. Your system needs more configuration for optimal use.")
         grade = "D"
     
     print(f"Grade: {grade}")
     
     if recommendations:
-        print("\n💡 Recommendations for improvement:")
+        print("\nRecommendations for improvement:")
         for i, rec in enumerate(recommendations, 1):
             print(f"{i}. {rec}")
     
@@ -1366,7 +1437,7 @@ def calculate_system_score(installer, log):
 
 def interactive_system_scoring(installer: 'Installer', log: LogFile, logo_animation):
     """Display system configuration scoring and recommendations."""
-    print("\n🎯 === Configuration Analysis ===")
+    print("\n=== Configuration Analysis ===")
     print("Let me analyze your current configuration and provide feedback...")
     
     # Wait a moment for dramatic effect
@@ -1376,7 +1447,7 @@ def interactive_system_scoring(installer: 'Installer', log: LogFile, logo_animat
     score, grade = calculate_system_score(installer, log)
     
     print("\n" + "="*50)
-    print("📋 Configuration Summary:")
+    print("Configuration Summary:")
     print(f"   • Total Packages: {len(installer.additional_packages)}")
     print(f"   • Services Enabled: {len([s for s in installer.services if s])}")
     print(f"   • Desktop Environment: {'Configured' if hasattr(installer, 'desktop_packages') and installer.desktop_packages else 'Not configured'}")
@@ -1387,7 +1458,7 @@ def interactive_system_scoring(installer: 'Installer', log: LogFile, logo_animat
     if score < 90:
         improve = input_with_pause(f"\nWould you like suggestions to improve your score? (y/n): ", logo_animation).strip().lower()
         if improve == 'y':
-            print("\n🔧 Suggested improvements:")
+            print("\nSuggested improvements:")
             if score < 60:
                 print("   • Add a desktop environment for better usability")
                 print("   • Install graphics drivers for optimal performance")
@@ -1403,9 +1474,9 @@ def interactive_system_scoring(installer: 'Installer', log: LogFile, logo_animat
                 print("   • Consider specialized tools for your use case")
                 print("   • Add monitoring and maintenance tools")
     
-    print("\n✅ Analysis complete! Proceeding with installation...")
+    print("\nAnalysis complete! Proceeding with installation...")
     """Accessibility and usability enhancements."""
-    print("\n♿ === Accessibility Features ===")
+    print("\n === Accessibility Features ===")
     
     accessibility_options = {
         '1': ('Screen Reader (Orca)', 'screen_reader'),
@@ -1677,19 +1748,59 @@ def interactive_services(installer: 'Installer', log: LogFile, logo_animation):
      
 
 def interactive_timezone(installer: 'Installer', log: LogFile, logo_animation):
-    tz = input_with_pause("Set timezone (default America/New_York): ", logo_animation).strip()
-    if not tz:
-        tz = "America/New_York"
+    print("\n=== Timezone Setup ===")
+    common_timezones = {
+        '1': ('America/Los_Angeles', 'Pacific Time'),
+        '2': ('America/Denver', 'Mountain Time'),
+        '3': ('America/Chicago', 'Central Time'),
+        '4': ('America/New_York', 'Eastern Time'),
+        '5': ('Europe/London', 'London'),
+        '6': ('Europe/Berlin', 'Berlin'),
+        '7': ('Asia/Tokyo', 'Tokyo'),
+        '8': ('Asia/Kolkata', 'India'),
+        '9': ('Australia/Sydney', 'Sydney'),
+        '10': ('custom', 'Custom timezone'),
+        '0': ('America/New_York', 'Keep default')
+    }
+
+    print("Available timezones:")
+    for key, (tz_value, tz_name) in common_timezones.items():
+        print(f"{key}. {tz_name} ({tz_value})")
+
+    choice = input_with_pause("Select timezone: ", logo_animation).strip()
+    tz = common_timezones.get(choice, ('America/New_York', 'Default'))[0]
+    if tz == 'custom':
+        tz = input_with_pause("Enter timezone (example: America/Los_Angeles): ", logo_animation).strip() or 'America/New_York'
     
     if MOCK_MODE:
         log.info(f"[MOCK] Timezone set to {tz}")
         print(f"Timezone set to {tz}")
     else:
-        installer.set_timezone(tz)
-        installer.activate_time_synchronization()
+        installer.selected_timezone = tz
         print(f"Timezone set to {tz}")
-        log.info(f"Timezone set to {tz}")
-     
+        log.info(f"Timezone selected for target system: {tz}")
+
+
+def sync_live_system_time(log: LogFile):
+    """Sync the live environment clock so pacman/GPG validation works."""
+    if MOCK_MODE:
+        log.info("[MOCK] Would sync live system time via NTP")
+        print("[MOCK] Live system time synchronized")
+        return
+
+    print("Synchronizing system time...")
+    commands = [
+        "timedatectl set-ntp true",
+        "systemctl restart systemd-timesyncd",
+        "timedatectl set-timezone UTC || true",
+        "timedatectl timesync-status || timedatectl status"
+    ]
+    for command in commands:
+        run_command(command, log)
+
+    log.info("Requested live system time synchronization.")
+    print("System time sync requested for pacman/GPG validation.")
+
 
 def interactive_wifi(installer: 'Installer', log: LogFile, logo_animation):
     run_command("nmcli radio wifi on", log)
@@ -1710,8 +1821,13 @@ def interactive_wifi(installer: 'Installer', log: LogFile, logo_animation):
                 ssid = networks[choice-1]
                 password = input_with_pause(f"Enter password for {ssid}: ", logo_animation)
                 cmd = f"nmcli device wifi connect '{ssid}' password '{password}'"
-                run_command(cmd, log)
-                log.info(f"Connected to Wi-Fi network: {ssid}")
+                result = run_command(cmd, log)
+                if result == 0:
+                    log.info(f"Connected to Wi-Fi network: {ssid}")
+                    sync_live_system_time(log)
+                else:
+                    log.error(f"Failed to connect to Wi-Fi network: {ssid}")
+                    print("Wi-Fi connection failed.")
             else:
                 log.info("Wi-Fi setup skipped by user.")
                 print("Skipping Wi-Fi setup.")
@@ -1732,16 +1848,19 @@ def interactive_bootloader(installer: 'Installer', log: LogFile, logo_animation)
     choice = input_with_pause("Select bootloader: ", logo_animation)
     try:
         choice = int(choice)
+        uki_enabled = False
+        if arch_config_handler and getattr(arch_config_handler, 'config', None):
+            uki_enabled = bool(getattr(arch_config_handler.config, 'uki', False))
         if MOCK_MODE:
             if choice == 1: log.info("[MOCK] Bootloader installed: GRUB")
             elif choice == 2: log.info("[MOCK] Bootloader installed: SystemdBoot")
             else: log.info("[MOCK] Bootloader setup skipped.")
         else:
             if choice == 1:
-                installer.add_bootloader('grub', arch_config_handler.config.uki)
+                installer.add_bootloader('grub', uki_enabled)
                 log.info("Bootloader installed: GRUB")
             elif choice == 2:
-                installer.add_bootloader('systemd-boot', arch_config_handler.config.uki)
+                installer.add_bootloader('systemd-boot', uki_enabled)
                 log.info("Bootloader installed: SystemdBoot")
             else:
                 print("Skipping bootloader setup.")
@@ -1850,21 +1969,20 @@ def setup_login_ui(installer: 'Installer', log: LogFile):
 
 def install_feature_updater(installer: 'Installer', log: LogFile, repo_url: str, branch: str = 'main'):
     """Install a startup updater that fetches latest feature archive from GitHub."""
-    
-    script_path = '/usr/local/bin/narchs_feature_updater.sh'
-    service_path = '/etc/systemd/system/narchs-feature-updater.service'
-    timer_path = '/etc/systemd/system/narchs-feature-updater.timer'
+    target_root = Path(installer.mount_point)
+    script_path = target_root / 'usr' / 'local' / 'bin' / 'narchs_feature_updater.sh'
+    service_path = target_root / 'etc' / 'systemd' / 'system' / 'narchs-feature-updater.service'
+    timer_path = target_root / 'etc' / 'systemd' / 'system' / 'narchs-feature-updater.timer'
 
     log.info(f"Installing feature updater script to {script_path}")
-    
+
     if MOCK_MODE:
         log.info("[MOCK] Not in root check skipped")
     elif os.geteuid() != 0:
         log.info("Not in root")
         raise PermissionError("Must be run as root.")
-    
-    log.info("Confirmed running as root (or MOCK).")
 
+    log.info("Confirmed running as root (or MOCK).")
 
     updater_script = f"""#!/usr/bin/env bash
 set -euo pipefail
@@ -1888,14 +2006,12 @@ fi
 
 mkdir -p "$TMPDIR/extracted"
 tar -xzf "$TMPDIR/features.tar.gz" -C "$TMPDIR/extracted"
-# find the extracted repo directory
 DIR=$(find "$TMPDIR/extracted" -maxdepth 1 -mindepth 1 -type d | head -n1)
 if [ -z "$DIR" ]; then
   echo "Failed to find extracted directory" >&2
   exit 1
 fi
 
-# Prefer install_features.py then features.py
 if [ -f "$DIR/install_features.py" ]; then
   python3 "$DIR/install_features.py" || exit 1
 elif [ -f "$DIR/features.py" ]; then
@@ -1910,35 +2026,33 @@ fi
         log.info(f"[MOCK] Written updater script to {script_path}")
         log.info(f"[MOCK] Written systemd service to {service_path}")
         log.info(f"[MOCK] Written systemd timer to {timer_path}")
-        log.info("[MOCK] Helper commands (systemctl enable/start) would run here.")
         return
 
     try:
-        # write the updater script
-        with open(script_path, 'w', encoding='utf-8') as f:
-            f.write(updater_script)
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        service_path.parent.mkdir(parents=True, exist_ok=True)
+
+        script_path.write_text(updater_script, encoding='utf-8')
         os.chmod(script_path, 0o755)
         log.info("Updater script written and made executable.")
-        # write the systemd service (oneshot)
-        service_unit = f"""[Unit]
+
+        service_unit = """[Unit]
 Description=Narchs feature updater
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart={script_path}
+ExecStart=/usr/local/bin/narchs_feature_updater.sh
 User=root
 
 [Install]
 WantedBy=multi-user.target
 """
-        with open(service_path, 'w', encoding='utf-8') as f:
-            f.write(service_unit)
+        service_path.write_text(service_unit, encoding='utf-8')
         log.info(f"Systemd unit written to {service_path}")
 
-        # write a systemd timer
-        timer_unit = f"""[Unit]
+        timer_unit = """[Unit]
 Description=Run Narchs feature updater daily and on boot
 
 [Timer]
@@ -1949,36 +2063,20 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 """
-        with open(timer_path, 'w', encoding='utf-8') as f:
-            f.write(timer_unit)
+        timer_path.write_text(timer_unit, encoding='utf-8')
         log.info(f"Systemd timer written to {timer_path}")
 
-        # reload systemd and enable the service and timer
-        run_command('systemctl daemon-reload', log)
-        run_command('systemctl enable narchs-feature-updater.service', log)
-        run_command('systemctl enable --now narchs-feature-updater.timer', log)
+        run_command(f'arch-chroot {installer.mount_point} systemctl daemon-reload', log)
+        run_command(f'arch-chroot {installer.mount_point} systemctl enable narchs-feature-updater.service', log)
+        run_command(f'arch-chroot {installer.mount_point} systemctl enable narchs-feature-updater.timer', log)
         log.info('Feature updater service and timer enabled.')
-
     except Exception as e:
         log.error(f"Failed to install feature updater: {e}")
         raise
 
-
-    """Run the feature updater script once immediately."""
-    script_path = '/usr/local/bin/narchs_feature_updater.sh'
-    if os.path.exists(script_path) and os.access(script_path, os.X_OK):
-        log.info('Running feature updater once...')
-        ret = run_command(script_path, log)
-        if ret != 0:
-            log.error(f'Feature updater script returned non-zero exit code: {ret}')
-        else:
-            log.info('Feature updater completed successfully.')
-    else:
-        log.warn('Feature updater script not present or not executable.')
-
 def interactive_company_integrations(installer: 'Installer', log: LogFile, logo_animation):
     """Integrate with popular companies and services."""
-    print("\n🤝 === Company Integrations & Partnerships ===")
+    print("\n=== Company Integrations & Partnerships ===")
     print("SENDUNE Linux partners with leading technology companies!")
     
     integrations = {
@@ -2092,7 +2190,7 @@ def apply_company_integrations(installer, integrations, log):
 
 def interactive_ai_powered_features(installer: 'Installer', log: LogFile, logo_animation):
     """Advanced AI-powered features and automation."""
-    print("\n🧠 === AI-Powered Features ===")
+    print("\n === AI-Powered Features ===")
     print("Experience the future of Linux with SENDUNE's AI capabilities!")
     
     ai_features = {
@@ -2205,7 +2303,7 @@ def apply_ai_features(installer, ai_features, log):
 
 def interactive_enterprise_features(installer: 'Installer', log: LogFile, logo_animation):
     """Enterprise-grade features and integrations."""
-    print("\n🏢 === Enterprise Features ===")
+    print("\n=== Enterprise Features ===")
     print("Professional-grade tools for business and enterprise use!")
     
     enterprise_features = {

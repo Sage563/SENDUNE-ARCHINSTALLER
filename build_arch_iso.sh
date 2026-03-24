@@ -1,133 +1,163 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================
-# SENDUNE ISO Builder v3.0.0 (Multi-OS)
-# Custom profile - no Arch releng dependency
+# SENDUNE ISO Builder
+# Supports native Arch builds and Docker-based builds for WSL/other distros.
+# AND THIS does require Internet connection to pull packages and dependencies during the build process.
 # =============================================
 set -euo pipefail
 IFS=$'\n\t'
 
-# ---------- CONFIGURATION ----------
-INSTALLER_DIR="${1:-}"
-OUTPUT_ISO="${2:-./out-iso/sendune.iso}"
-ISO_NAME="${3:-SENDUNE}"
-CLEAN="${4:-}"
-
-# Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
-error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+info() { echo -e "${BLUE}[INFO]${NC} $*"; }
+warn() { echo -e "${YELLOW}[WARN]${NC} $*"; }
+error() { echo -e "${RED}[ERROR]${NC} $*" >&2; exit 1; }
+success() { echo -e "${GREEN}[OK]${NC} $*"; }
 
-# ---------- USAGE ----------
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BUILD_ROOT="${SCRIPT_DIR}/.build-archiso"
+PROFILE_DIR="${BUILD_ROOT}/profile"
+WORK_DIR="${BUILD_ROOT}/work"
+
+INSTALLER_DIR=""
+OUTPUT_ISO="${SCRIPT_DIR}/out-iso/SENDUNE.iso"
+ISO_NAME="SENDUNE"
+CLEAN=0
+VERBOSE=0
+
 usage() {
-    cat <<EOF
-Usage: $0 <installer_dir> [output_iso] [iso_name] [clean]
+    cat <<'EOF'
+Usage:
+  ./build_arch_iso.sh <installer_dir> [options]
 
-Arguments:
-    installer_dir   Path to SENDUNE installer directory (required)
-    output_iso      Output ISO path (default: ./out-iso/sendune.iso)
-    iso_name        ISO volume name (default: SENDUNE)
-    clean           Pass 'clean' to force fresh build
+Options:
+  -o, --output FILE   Output ISO path (default: ./out-iso/SENDUNE.iso)
+  -n, --name NAME     ISO name/label (default: SENDUNE)
+  -c, --clean         Remove previous build artifacts before building
+  -v, --verbose       Enable verbose mkarchiso output
+  -h, --help          Show this help message
 
-Example:
-    $0 ./installer ./sendune-custom.iso SENDUNE clean
+Examples:
+  ./build_arch_iso.sh SENDUNE_installer
+  ./build_arch_iso.sh SENDUNE_installer -o ~/Downloads/sendune.iso
+  ./build_arch_iso.sh SENDUNE_installer -n MyDistro --clean
 EOF
-    exit 1
 }
 
-# ---------- VALIDATE ARGUMENTS ----------
-if [ -z "$INSTALLER_DIR" ]; then
-    error "Missing required argument: installer_dir"
-fi
-
-if [ ! -d "$INSTALLER_DIR" ]; then
-    error "Installer directory not found: $INSTALLER_DIR"
-fi
-
-# Convert to absolute path
-INSTALLER_DIR="$(cd "$INSTALLER_DIR" && pwd)"
-
-# ---------- DETECT OS ----------
 detect_os() {
-    if [ -f /etc/os-release ]; then
+    if [[ -f /etc/os-release ]]; then
         . /etc/os-release
-        echo "$ID"
-    elif [ -f /etc/arch-release ]; then
-        echo "arch"
-    else
-        echo "unknown"
+        printf '%s' "${ID:-unknown}"
+        return
     fi
+    if [[ -f /etc/arch-release ]]; then
+        printf '%s' "arch"
+        return
+    fi
+    printf '%s' "unknown"
 }
 
-OS_ID=$(detect_os)
-info "Detected OS: $OS_ID"
+is_wsl() {
+    grep -qi microsoft /proc/version 2>/dev/null
+}
 
-# ---------- DOCKER BUILD FUNCTION ----------
-build_with_docker() {
-    info "Building SENDUNE ISO using Docker with Arch Linux container..."
+abs_path() {
+    local target="$1"
+    local parent
+    mkdir -p "$(dirname "$target")"
+    parent="$(cd "$(dirname "$target")" && pwd)"
+    printf '%s/%s\n' "$parent" "$(basename "$target")"
+}
 
-    # Check if Docker is installed
-    if ! command -v docker &> /dev/null; then
-        error "Docker is not installed. Please install Docker first:
-    Ubuntu/Debian: sudo apt install docker.io
-    Fedora: sudo dnf install docker
-    Then enable it: sudo systemctl start docker"
+docker_cmd() {
+    if docker info >/dev/null 2>&1; then
+        printf '%s\n' "docker"
+        return
+    fi
+    if command -v sudo >/dev/null 2>&1 && sudo docker info >/dev/null 2>&1; then
+        printf '%s\n' "sudo docker"
+        return
+    fi
+    return 1
+}
+
+parse_args() {
+    [[ $# -gt 0 ]] || {
+        usage
+        exit 1
+    }
+
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            -o|--output)
+                [[ $# -ge 2 ]] || error "Missing value for $1"
+                OUTPUT_ISO="$2"
+                shift 2
+                ;;
+            -n|--name)
+                [[ $# -ge 2 ]] || error "Missing value for $1"
+                ISO_NAME="$2"
+                shift 2
+                ;;
+            -c|--clean)
+                CLEAN=1
+                shift
+                ;;
+            -v|--verbose)
+                VERBOSE=1
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            --)
+                shift
+                break
+                ;;
+            -*)
+                error "Unknown option: $1"
+                ;;
+            *)
+                if [[ -z "$INSTALLER_DIR" ]]; then
+                    INSTALLER_DIR="$1"
+                else
+                    error "Unexpected argument: $1"
+                fi
+                shift
+                ;;
+        esac
+    done
+
+    [[ -n "$INSTALLER_DIR" ]] || error "Missing required argument: installer_dir"
+    [[ -d "$INSTALLER_DIR" ]] || error "Installer directory not found: $INSTALLER_DIR"
+
+    INSTALLER_DIR="$(cd "$INSTALLER_DIR" && pwd)"
+    OUTPUT_ISO="$(abs_path "$OUTPUT_ISO")"
+}
+
+prepare_build_root() {
+    if [[ "$CLEAN" -eq 1 ]]; then
+        info "Cleaning previous build artifacts..."
+        rm -rf "$BUILD_ROOT"
     fi
 
-    # Check Docker daemon
-    if ! sudo docker info &> /dev/null; then
-        error "Docker daemon is not running. Start it with: sudo systemctl start docker"
-    fi
+    mkdir -p "$PROFILE_DIR" "$WORK_DIR" "$(dirname "$OUTPUT_ISO")"
+}
 
-    # Prepare directories
-    SCRIPT_DIR="$(pwd)"
-    OUTPUT_DIR="$(cd "$(dirname "$OUTPUT_ISO")" && pwd)"
-    OUTPUT_FILENAME="$(basename "$OUTPUT_ISO")"
-
-    info "Creating Dockerfile..."
-    DOCKER_DIR="$SCRIPT_DIR/.docker_build"
-    mkdir -p "$DOCKER_DIR"
-
-    cat > "$DOCKER_DIR/Dockerfile" <<'DOCKERFILE'
-FROM archlinux:latest
-
-# Update system and install minimal dependencies
-RUN pacman -Syu --noconfirm && \
-    pacman -S --noconfirm \
-    base \
-    archiso \
-    git \
-    sudo \
-    imagemagick && \
-    pacman -Scc --noconfirm
-
-# Create build user and directory
-RUN useradd -m -G wheel builder && \
-    echo "builder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers && \
-    mkdir -p /build && \
-    chown -R builder:builder /build
-
-USER builder
-WORKDIR /build
-
-CMD ["/bin/bash"]
-DOCKERFILE
-
-    info "Building Docker image (this may take a few minutes)..."
-    sudo docker build -t sendune-iso-builder "$DOCKER_DIR" || error "Failed to build Docker image"
-
-    info "Creating SENDUNE custom profile..."
-    PROFILE_DIR="$DOCKER_DIR/sendune_profile"
+write_common_profile() {
     rm -rf "$PROFILE_DIR"
-    mkdir -p "$PROFILE_DIR"
+    mkdir -p \
+        "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants" \
+        "$PROFILE_DIR/airootfs/root" \
+        "$PROFILE_DIR/airootfs/usr/local/bin" \
+        "$PROFILE_DIR/syslinux" \
+        "$PROFILE_DIR/efiboot/loader/entries"
 
-    # Create profiledef.sh with updated boot modes
     cat > "$PROFILE_DIR/profiledef.sh" <<EOF
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
@@ -135,7 +165,7 @@ DOCKERFILE
 iso_name="${ISO_NAME,,}"
 iso_label="${ISO_NAME^^}"
 iso_publisher="SENDUNE <https://github.com/Sage563/SENDUNE-ARCHINSTALLER>"
-iso_application="SENDUNE Live/Rescue System"
+iso_application="SENDUNE Live System"
 iso_version="\$(date +%Y.%m.%d)"
 install_dir="sendune"
 buildmodes=('iso')
@@ -148,77 +178,57 @@ bootstrap_tarball_compression=('gzip')
 file_permissions=()
 EOF
 
-    # Create minimal packages list
     cat > "$PROFILE_DIR/packages.x86_64" <<'EOF'
-# Base system
 base
 linux
 linux-firmware
-
-# Boot and firmware
-syslinux
-efibootmgr
-efivar
-memtest86+
-systemd
-
-# Filesystem tools
+arch-install-scripts
+archinstall
+bash-completion
+base-devel
+curl
+dhcpcd
 dosfstools
 e2fsprogs
-ntfs-3g
+efibootmgr
+efivar
 exfatprogs
-
-# Installation tools
-arch-install-scripts
-pacman
-
-# Networking
-dhcpcd
-iwd
-networkmanager
-
-# Compression
-squashfs-tools
-xz
-
-# System utilities
-sudo
-nano
-vim
-bash-completion
-
-# Hardware detection
-pciutils
-usbutils
-lshw
-
-# Disk utilities
+git
+go
 gptfdisk
 hdparm
-
-# Additional utilities
-wget
-curl
-rsync
+iwd
 less
+lshw
 man-db
 man-pages
-
-# Python for installer
+memtest86+
+nano
+networkmanager
+ntfs-3g
+pacman
+pciutils
 python
 python-pip
 python-setuptools
 python-wheel
-archinstall
+rsync
+squashfs-tools
+sudo
+syslinux
+systemd
+usbutils
+vim
+wget
+xz
 EOF
 
-    # Create pacman.conf
     cat > "$PROFILE_DIR/pacman.conf" <<'EOF'
 [options]
-HoldPkg     = pacman glibc
+HoldPkg = pacman glibc
 Architecture = auto
 CheckSpace
-SigLevel    = Required DatabaseOptional
+SigLevel = Required DatabaseOptional
 LocalFileSigLevel = Optional
 
 [core]
@@ -227,15 +237,6 @@ Include = /etc/pacman.d/mirrorlist
 [extra]
 Include = /etc/pacman.d/mirrorlist
 EOF
-
-    # Create airootfs directory structure
-    mkdir -p "$PROFILE_DIR/airootfs/etc"
-    mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/system"
-    mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/network"
-    mkdir -p "$PROFILE_DIR/airootfs/root"
-
-    # Create syslinux boot configuration
-    mkdir -p "$PROFILE_DIR/syslinux"
 
     cat > "$PROFILE_DIR/syslinux/syslinux.cfg" <<'EOF'
 DEFAULT loadconfig
@@ -282,548 +283,31 @@ LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
 INITRD /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
 APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL%
 
-LABEL sendune-nomodeset
-TEXT HELP
-Boot with nomodeset for compatibility.
-ENDTEXT
-MENU LABEL SENDUNE (nomodeset)
-LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-INITRD /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% nomodeset
-
 LABEL memtest
 MENU LABEL Memory Test (memtest86+)
 LINUX /%INSTALL_DIR%/boot/memtest86+/memtest.bin
 EOF
-
-    # Create efiboot configuration
-    mkdir -p "$PROFILE_DIR/efiboot/loader/entries"
 
     cat > "$PROFILE_DIR/efiboot/loader/loader.conf" <<'EOF'
 timeout 15
 default sendune.conf
 EOF
 
-    cat > "$PROFILE_DIR/efiboot/loader/entries/sendune.conf" <<'EOF'
-title   SENDUNE Live Environment
-linux   /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-initrd  /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-options archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL%
-EOF
-
-    cat > "$PROFILE_DIR/efiboot/loader/entries/sendune-nomodeset.conf" <<'EOF'
-title   SENDUNE (nomodeset)
-linux   /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-initrd  /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-options archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% nomodeset
-EOF
-
-    # Remove old motd
-    rm -f "$PROFILE_DIR/airootfs/etc/motd"
-
-    # Create hostname
-    echo "sendune" > "$PROFILE_DIR/airootfs/etc/hostname"
-
-    # Create hosts file
-    cat > "$PROFILE_DIR/airootfs/etc/hosts" <<'EOF'
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   sendune.localdomain sendune
-EOF
-
-    # Create locale.gen
-    cat > "$PROFILE_DIR/airootfs/etc/locale.gen" <<'EOF'
-en_US.UTF-8 UTF-8
-EOF
-
-    # Create locale.conf
-    cat > "$PROFILE_DIR/airootfs/etc/locale.conf" <<'EOF'
-LANG=en_US.UTF-8
-EOF
-
-    # Create vconsole.conf
-    cat > "$PROFILE_DIR/airootfs/etc/vconsole.conf" <<'EOF'
-KEYMAP=us
-EOF
-
-    # Enable NetworkManager
-    mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
-    ln -sf /usr/lib/systemd/system/NetworkManager.service \
-        "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants/NetworkManager.service"
-
-    # Enable dhcpcd
-    ln -sf /usr/lib/systemd/system/dhcpcd.service \
-        "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants/dhcpcd.service"
-
-    # Create welcome message
-    cat > "$PROFILE_DIR/airootfs/etc/motd" <<'EOF'
-
-███████╗███████╗███╗   ███╗██████╗ ██╗   ██╗███╗   ██╗███████╗
-██╔════╝██╔════╝████╗ ████║██╔══██╗██║   ██║████╗  ██║██╔════╝
-███████╗█████╗  ██╔████╔██║██║  ██║██║   ██║██╔██╗ ██║█████╗
-╚════██║██╔══╝  ██║╚██╔╝██║██║  ██║██║   ██║██║╚██╗██║██╔══╝
-███████║███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝██║ ╚████║███████╗
-╚══════╝╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-
-Welcome to SENDUNE Live Environment!
-
-Installer location: /root/SENDUNE_installer
-To install SENDUNE: sendune-installer
-
-EOF
-
-    # Create auto-login and installer launcher
-    cat > "$PROFILE_DIR/airootfs/root/.bash_profile" <<'EOF'
-#!/bin/bash
-
-# Run only in interactive shells
-[[ $- != *i* ]] && return
-
-# Clear screen and show welcome
-clear
-cat << 'WELCOME'
-
-███████╗███████╗███╗   ███╗██████╗ ██╗   ██╗███╗   ██╗███████╗
-██╔════╝██╔════╝████╗ ████║██╔══██╗██║   ██║████╗  ██║██╔════╝
-███████╗█████╗  ██╔████╔██║██║  ██║██║   ██║██╔██╗ ██║█████╗
-╚════██║██╔══╝  ██║╚██╔╝██║██║  ██║██║   ██║██║╚██╗██║██╔══╝
-███████║███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝██║ ╚████║███████╗
-╚══════╝╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝
-
-WELCOME
-
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Welcome to SENDUNE Live Environment"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "  To install SENDUNE, run:"
-echo ""
-echo "    sendune-installer"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-EOF
-    chmod +x "$PROFILE_DIR/airootfs/root/.bash_profile"
-
-    # Create build script
-    cat > "$DOCKER_DIR/build_in_container.sh" <<'BUILDSCRIPT'
-#!/bin/bash
-set -euo pipefail
-
-echo "════════════════════════════════════════════════════"
-echo "  SENDUNE ISO Builder - Container Build Process"
-echo "════════════════════════════════════════════════════"
-echo ""
-
-# Copy profile to work location
-echo "[1/6] Preparing build environment..."
-cp -r /build/profile /build/sendune_profile
-chmod +x /build/sendune_profile/profiledef.sh
-
-# Inject installer
-echo "[2/6] Injecting SENDUNE installer..."
-cp -r /build/installer /build/sendune_profile/airootfs/root/SENDUNE_installer
-find /build/sendune_profile/airootfs/root/SENDUNE_installer -type f -name "*.sh" -exec chmod +x {} \;
-
-# Pre-install dependencies via pip directly into airootfs
-echo "[2.1/6] Pre-installing Python dependencies into ISO..."
-PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-SITE_PACKAGES="/build/sendune_profile/airootfs/usr/lib/python${PYTHON_VERSION}/site-packages"
-mkdir -p "$SITE_PACKAGES"
-
-echo "  → Installing archinstall, pydantic, pyparted..."
-python3 -m pip install --upgrade pip 2>/dev/null || true
-python3 -m pip install \
-    --target "$SITE_PACKAGES" \
-    archinstall pydantic pyparted \
-    --no-cache-dir 2>/dev/null || {
-        echo "  ⚠ Pip installation failed, dependencies may be missing at runtime!"
-    }
-
-# Build Python wheel if setup.py or pyproject.toml exists
-echo "[2.2/6] Building SENDUNE installer package..."
-if [ -f /build/sendune_profile/airootfs/root/SENDUNE_installer/setup.py ] || \
-   [ -f /build/sendune_profile/airootfs/root/SENDUNE_installer/pyproject.toml ]; then
-
-    cd /build/sendune_profile/airootfs/root/SENDUNE_installer
-
-    # Build wheel and also install it to site-packages for immediate availability
-    echo "  → Building and pre-installing SENDUNE wheel..."
-    mkdir -p /tmp/sendune_wheels
-    python3 -m pip wheel . --no-deps -w /tmp/sendune_wheels 2>/dev/null || true
-    python3 -m pip install . --target "$SITE_PACKAGES" --no-deps 2>/dev/null || {
-        echo "  ⚠ Failed to pre-install SENDUNE package, will run from source"
-    }
-
-    # Bundle wheels for offline recovery
-    echo "  → Bundling wheels for offline recovery..."
-    mkdir -p /build/sendune_profile/airootfs/root/SENDUNE_wheels
-    cp /tmp/sendune_wheels/*.whl /build/sendune_profile/airootfs/root/SENDUNE_wheels/ 2>/dev/null || true
-    
-    # Download dependency wheels for offline access
-    echo "  → Downloading dependency wheels for offline access..."
-    python3 -m pip download archinstall pydantic pyparted -d /build/sendune_profile/airootfs/root/SENDUNE_wheels/ 2>/dev/null || true
-
-    # Create installer script that will be available in PATH
-    echo "  → Creating sendune-installer command..."
-    mkdir -p /build/sendune_profile/airootfs/usr/local/bin
-    cat > /build/sendune_profile/airootfs/usr/local/bin/sendune-installer <<'INSTALLER_SCRIPT'
-#!/bin/bash
-# SENDUNE Installer Wrapper
-set -e
-
-# Core check
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 not found. Cannot start installer." >&2
-    exit 1
-fi
-
-# The pre-installed packages should be in standard site-packages
-# but we add them to PYTHONPATH just in case of non-standard build paths
-export PYTHONPATH=$PYTHONPATH:/usr/lib/python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages
-
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "⚠ archinstall module missing from site-packages, attempting to install from local wheels..."
-    if [ -d /root/SENDUNE_wheels ]; then
-        pip install --no-index --find-links=/root/SENDUNE_wheels archinstall pydantic pyparted 2>/dev/null || true
-    fi
-fi
-
-# Final check
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "ERROR: archinstall module not found." >&2
-    exit 1
-fi
-
-# Run the installer
-if command -v senduneinstaller &>/dev/null; then
-    senduneinstaller "$@"
-else
-    cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
-fi
-INSTALLER_SCRIPT
-    chmod +x /build/sendune_profile/airootfs/usr/local/bin/sendune-installer
-    echo "  ✓ sendune-installer command created"
-
-    cd /build
-else
-    echo "  ⚠ No setup.py found, creating simple launcher..."
-    mkdir -p /build/sendune_profile/airootfs/usr/local/bin
-    cat > /build/sendune_profile/airootfs/usr/local/bin/sendune-installer <<'SIMPLE_SCRIPT'
-#!/bin/bash
-set -e
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "ERROR: archinstall module missing." >&2
-    exit 1
-fi
-cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
-SIMPLE_SCRIPT
-    chmod +x /build/sendune_profile/airootfs/usr/local/bin/sendune-installer
-fi
-
-# Copy splash image if exists
-WALLPAPER_PATH="/build/sendune_profile/airootfs/root/SENDUNE_installer/assets/sendune_wallpaper.png"
-if [ -f "$WALLPAPER_PATH" ]; then
-    echo "[2.3/6] Processing SENDUNE splash image..."
-    mkdir -p /build/sendune_profile/syslinux
-
-    # Convert PNG to proper format and resolution for syslinux (640x480, 16 colors)
-    if command -v convert &> /dev/null; then
-        echo "  → Converting image to syslinux format..."
-        convert "$WALLPAPER_PATH" -resize 640x480 -colors 16 /build/sendune_profile/syslinux/splash.png 2>/dev/null || {
-            echo "  ⚠ Conversion failed, copying original..."
-            cp "$WALLPAPER_PATH" /build/sendune_profile/syslinux/splash.png
-        }
-    else
-        echo "  ⚠ ImageMagick not found, copying original image..."
-        cp "$WALLPAPER_PATH" /build/sendune_profile/syslinux/splash.png
-    fi
-
-    # Verify splash image was created
-    if [ -f /build/sendune_profile/syslinux/splash.png ]; then
-        echo "  ✓ Splash image ready"
-        # Add background to syslinux config if not already there
-        if ! grep -q "MENU BACKGROUND splash.png" /build/sendune_profile/syslinux/archiso.cfg; then
-            sed -i '/MENU TITLE SENDUNE Live Environment/a MENU BACKGROUND splash.png' /build/sendune_profile/syslinux/archiso.cfg
-        fi
-    fi
-fi
-
-# Validate profile
-echo "[3/6] Validating profile structure..."
-# ls -la /build/sendune_profile/
-
-# Create work directory with proper permissions
-echo "[4/6] Creating work directories..."
-sudo mkdir -p /build/work /build/output
-sudo chown -R builder:builder /build/work /build/output
-
-# Build ISO
-echo "[5/6] Building ISO with mkarchiso..."
-echo "This may take 5-15 minutes depending on your system..."
-sudo mkarchiso -v -w /build/work -o /build/output /build/sendune_profile
-
-# Fix permissions
-echo "[6/6] Finalizing..."
-sudo chown -R builder:builder /build/output
-
-echo ""
-echo "════════════════════════════════════════════════════"
-echo "  Build Complete!"
-echo "════════════════════════════════════════════════════"
-ls -lh /build/output/*.iso 2>/dev/null || find /build/output -name "*.iso" -exec ls -lh {} \;
-BUILDSCRIPT
-
-    chmod +x "$DOCKER_DIR/build_in_container.sh"
-
-    # Create output directory
-    mkdir -p "$OUTPUT_DIR"
-
-    info "Running build in Docker container..."
-    info "This will download packages and build the ISO (may take 10-20 minutes)..."
-
-    sudo docker run --rm \
-        --privileged \
-        -v "$INSTALLER_DIR:/build/installer:ro" \
-        -v "$PROFILE_DIR:/build/profile:ro" \
-        -v "$DOCKER_DIR/build_in_container.sh:/build/build.sh:ro" \
-        -v "$OUTPUT_DIR:/build/output" \
-        sendune-iso-builder \
-        bash /build/build.sh \
-        || error "Docker build failed"
-
-    # Find and rename output ISO
-    info "Locating built ISO file..."
-
-    # Fix permissions on output directory
-    sudo chown -R $USER:$USER "$OUTPUT_DIR" 2>/dev/null || true
-
-    BUILT_ISO=$(find "$OUTPUT_DIR" -name "*.iso" -type f -printf '%T@ %p\n' 2>/dev/null | sort -n | tail -1 | cut -d' ' -f2-)
-
-    if [ -n "$BUILT_ISO" ] && [ -f "$BUILT_ISO" ]; then
-        if [ "$BUILT_ISO" != "$OUTPUT_DIR/$OUTPUT_FILENAME" ]; then
-            mv "$BUILT_ISO" "$OUTPUT_DIR/$OUTPUT_FILENAME"
-        fi
-        success "ISO successfully built at: $OUTPUT_DIR/$OUTPUT_FILENAME"
-        info "ISO size: $(du -h "$OUTPUT_DIR/$OUTPUT_FILENAME" | cut -f1)"
-        echo ""
-        info "Next steps:"
-        info "  1. Test with: qemu-system-x86_64 -cdrom $OUTPUT_DIR/$OUTPUT_FILENAME -m 2048"
-        info "  2. Write to USB: sudo dd if=$OUTPUT_DIR/$OUTPUT_FILENAME of=/dev/sdX bs=4M status=progress"
-        info "  3. Or use Ventoy, Rufus, or Etcher to create bootable USB"
-    else
-        error "ISO file not found after build"
-    fi
-
-    # Cleanup
-    if [ -n "$CLEAN" ]; then
-        info "Cleaning up Docker build directory..."
-        rm -rf "$DOCKER_DIR"
-    fi
-}
-
-# ---------- NATIVE ARCH BUILD FUNCTION ----------
-build_native_arch() {
-    info "Building SENDUNE ISO natively on Arch Linux..."
-
-    # Install dependencies
-    info "Installing dependencies..."
-    sudo pacman -Syu --needed --noconfirm archiso git imagemagick || error "Failed to install dependencies"
-
-    # Prepare directories
-    PROFILE_DIR="$(pwd)/sendune_profile"
-    OUTPUT_DIR="$(dirname "$OUTPUT_ISO")"
-    WORK_DIR="$(pwd)/work"
-
-    mkdir -p "$OUTPUT_DIR"
-
-    # Clean if requested
-    if [ -n "$CLEAN" ]; then
-        info "Cleaning existing work directories..."
-        rm -rf "$PROFILE_DIR" "$WORK_DIR"
-    fi
-
-    info "Creating SENDUNE custom profile..."
-    rm -rf "$PROFILE_DIR"
-    mkdir -p "$PROFILE_DIR"
-
-    # Create profiledef.sh with updated boot modes
-    cat > "$PROFILE_DIR/profiledef.sh" <<EOF
-#!/usr/bin/env bash
-# shellcheck disable=SC2034
-
-iso_name="${ISO_NAME,,}"
-iso_label="${ISO_NAME^^}"
-iso_publisher="SENDUNE <https://sendune.org>"
-iso_application="SENDUNE Live/Rescue System"
-iso_version="\$(date +%Y.%m.%d)"
-install_dir="sendune"
-buildmodes=('iso')
-bootmodes=('bios.syslinux' 'uefi-x64.systemd-boot.esp' 'uefi-x64.systemd-boot.eltorito')
-arch="x86_64"
-pacman_conf="pacman.conf"
-airootfs_image_type="squashfs"
-airootfs_image_tool_options=('-comp' 'xz' '-Xbcj' 'x86' '-b' '1M' '-Xdict-size' '1M')
-bootstrap_tarball_compression=('gzip')
-file_permissions=()
-EOF
-
-    # Create minimal packages list
-    cat > "$PROFILE_DIR/packages.x86_64" <<'EOF'
-base
-linux
-linux-firmware
-syslinux
-efibootmgr
-efivar
-memtest86+
-systemd
-dosfstools
-e2fsprogs
-ntfs-3g
-exfatprogs
-arch-install-scripts
-pacman
-dhcpcd
-iwd
-networkmanager
-squashfs-tools
-xz
-sudo
-nano
-vim
-bash-completion
-pciutils
-usbutils
-lshw
-parted
-gptfdisk
-hdparm
-wget
-curl
-rsync
-less
-man-db
-man-pages
-python
-python-pip
-python-setuptools
-python-wheel
-archinstall
-EOF
-
-    # Create pacman.conf
-    cat > "$PROFILE_DIR/pacman.conf" <<'EOF'
-[options]
-HoldPkg     = pacman glibc
-Architecture = auto
-CheckSpace
-SigLevel    = Required DatabaseOptional
-LocalFileSigLevel = Optional
-
-[core]
-Include = /etc/pacman.d/mirrorlist
-
-[extra]
-Include = /etc/pacman.d/mirrorlist
-EOF
-
-    # Create airootfs directory structure
-    mkdir -p "$PROFILE_DIR/airootfs/etc"
-    mkdir -p "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants"
-    mkdir -p "$PROFILE_DIR/airootfs/root"
-
-    # Create syslinux boot configuration
-    mkdir -p "$PROFILE_DIR/syslinux"
-
-    cat > "$PROFILE_DIR/syslinux/syslinux.cfg" <<'EOF'
-DEFAULT loadconfig
-
-LABEL loadconfig
-  CONFIG archiso.cfg
-  APPEND ../../%INSTALL_DIR%/boot/syslinux/
-EOF
-
-    cat > "$PROFILE_DIR/syslinux/archiso.cfg" <<'EOF'
-SERIAL 0 115200
-UI vesamenu.c32
-MENU TITLE SENDUNE Live Environment
-
-MENU WIDTH 78
-MENU MARGIN 4
-MENU ROWS 7
-MENU VSHIFT 10
-MENU TIMEOUTROW 13
-MENU TABMSGROW 14
-MENU CMDLINEROW 14
-MENU HELPMSGROW 16
-MENU HELPMSGENDROW 29
-
-MENU COLOR border       30;44   #40ffffff #a0000000 std
-MENU COLOR title        1;36;44 #9033ccff #a0000000 std
-MENU COLOR sel          7;37;40 #e0ffffff #20ffffff all
-MENU COLOR unsel        37;44   #50ffffff #a0000000 std
-MENU COLOR help         37;40   #c0ffffff #a0000000 std
-MENU COLOR timeout_msg  37;40   #80ffffff #00000000 std
-MENU COLOR timeout      1;37;40 #c0ffffff #00000000 std
-MENU COLOR msg07        37;40   #90ffffff #a0000000 std
-MENU COLOR tabmsg       31;40   #30ffffff #00000000 std
-
-TIMEOUT 150
-ONTIMEOUT sendune
-
-LABEL sendune
-TEXT HELP
-Boot the SENDUNE live environment.
-ENDTEXT
-MENU LABEL SENDUNE (x86_64)
-LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-INITRD /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL%
-
-LABEL sendune-nomodeset
-TEXT HELP
-Boot with nomodeset for compatibility.
-ENDTEXT
-MENU LABEL SENDUNE (nomodeset)
-LINUX /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-INITRD /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-APPEND archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% nomodeset
-
-LABEL memtest
-MENU LABEL Memory Test (memtest86+)
-LINUX /%INSTALL_DIR%/boot/memtest86+/memtest.bin
-EOF
-
-    # Create efiboot configuration
-    mkdir -p "$PROFILE_DIR/efiboot/loader/entries"
-
-    cat > "$PROFILE_DIR/efiboot/loader/loader.conf" <<'EOF'
-timeout 15
-default sendune.conf
-EOF
-
-    cat > "$PROFILE_DIR/efiboot/loader/entries/sendune.conf" <<'EOF'
+cat > "$PROFILE_DIR/efiboot/loader/entries/sendune.conf" <<'EOF'
 title   SENDUNE Live Environment (x86_64, UEFI)
 linux   /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
 initrd  /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
 options archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL%
 EOF
 
-    cat > "$PROFILE_DIR/efiboot/loader/entries/sendune-nomodeset.conf" <<'EOF'
-title   SENDUNE (nomodeset, UEFI)
-linux   /%INSTALL_DIR%/boot/x86_64/vmlinuz-linux
-initrd  /%INSTALL_DIR%/boot/x86_64/initramfs-linux.img
-options archisobasedir=%INSTALL_DIR% archisolabel=%ARCHISO_LABEL% nomodeset
+    cat > "$PROFILE_DIR/airootfs/etc/hostname" <<'EOF'
+sendune
 EOF
 
-    echo "sendune" > "$PROFILE_DIR/airootfs/etc/hostname"
-
     cat > "$PROFILE_DIR/airootfs/etc/hosts" <<'EOF'
-127.0.0.1   localhost
-::1         localhost
-127.0.1.1   sendune.localdomain sendune
+127.0.0.1 localhost
+::1 localhost
+127.0.1.1 sendune.localdomain sendune
 EOF
 
     cat > "$PROFILE_DIR/airootfs/etc/locale.gen" <<'EOF'
@@ -843,209 +327,207 @@ EOF
     ln -sf /usr/lib/systemd/system/dhcpcd.service \
         "$PROFILE_DIR/airootfs/etc/systemd/system/multi-user.target.wants/dhcpcd.service"
 
-    # Create bash profile for welcome message
     cat > "$PROFILE_DIR/airootfs/root/.bash_profile" <<'EOF'
 #!/bin/bash
 
-# Run only in interactive shells
 [[ $- != *i* ]] && return
 
-# Clear screen and show welcome
 clear
-cat << 'WELCOME'
+cat <<'WELCOME'
 
-███████╗███████╗███╗   ███╗██████╗ ██╗   ██╗███╗   ██╗███████╗
-██╔════╝██╔════╝████╗ ████║██╔══██╗██║   ██║████╗  ██║██╔════╝
-███████╗█████╗  ██╔████╔██║██║  ██║██║   ██║██╔██╗ ██║█████╗
-╚════██║██╔══╝  ██║╚██╔╝██║██║  ██║██║   ██║██║╚██╗██║██╔══╝
-███████║███████╗██║ ╚═╝ ██║██████╔╝╚██████╔╝██║ ╚████║███████╗
-╚══════╝╚══════╝╚═╝     ╚═╝╚═════╝  ╚═════╝ ╚═╝  ╚═══╝╚══════╝
+SENDUNE Live Environment
 
 WELCOME
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "  Welcome to SENDUNE Live Environment"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-echo "  To install SENDUNE, run:"
-echo ""
-echo "    sendune-installer"
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
+echo
+echo "Run 'sendune-installer' to start the installer."
+echo
+
+# Auto-start the installer once when logging into the live ISO shell.
+if [[ -z "${SENDUNE_INSTALLER_STARTED:-}" ]]; then
+    export SENDUNE_INSTALLER_STARTED=1
+    exec sendune-installer
+fi
 EOF
     chmod +x "$PROFILE_DIR/airootfs/root/.bash_profile"
 
-    # Inject installer
-    info "Injecting SENDUNE installer..."
-    cp -r "$INSTALLER_DIR" "$PROFILE_DIR/airootfs/root/SENDUNE_installer"
-    find "$PROFILE_DIR/airootfs/root/SENDUNE_installer" -type f -name "*.sh" -exec chmod +x {} \;
+    info "Copying installer into ISO profile..."
+    cp -R "$INSTALLER_DIR" "$PROFILE_DIR/airootfs/root/SENDUNE_installer"
 
-    # Pre-install dependencies via pip directly into airootfs
-    info "Pre-installing Python dependencies into ISO..."
-    PYTHON_VERSION=$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')
-    SITE_PACKAGES="$PROFILE_DIR/airootfs/usr/lib/python${PYTHON_VERSION}/site-packages"
-    mkdir -p "$SITE_PACKAGES"
-
-    info "Installing archinstall, pydantic, pyparted via pip..."
-    python3 -m pip install --upgrade pip 2>/dev/null || true
-    python3 -m pip install \
-        --target "$SITE_PACKAGES" \
-        archinstall pydantic pyparted \
-        --no-cache-dir 2>/dev/null || {
-            warn "Pip installation failed, dependencies may be missing!"
-        }
-
-    # Build Python wheel if setup.py or pyproject.toml exists
-    info "Setting up SENDUNE installer package..."
-    if [ -f "$INSTALLER_DIR/setup.py" ] || [ -f "$INSTALLER_DIR/pyproject.toml" ]; then
-        info "Building and pre-installing SENDUNE wheel..."
-
-        # Build wheel in temporary directory
-        WHEEL_DIR=$(mktemp -d)
-        cd "$INSTALLER_DIR"
-        python3 -m pip wheel . --no-deps -w "$WHEEL_DIR" 2>/dev/null || true
-        python3 -m pip install . --target "$SITE_PACKAGES" --no-deps 2>/dev/null || true
-        
-        # Bundle wheels for offline recovery
-        mkdir -p "$PROFILE_DIR/airootfs/root/SENDUNE_wheels"
-        cp "$WHEEL_DIR"/*.whl "$PROFILE_DIR/airootfs/root/SENDUNE_wheels/" 2>/dev/null || true
-        
-        # Download dependency wheels
-        info "Downloading dependency wheels for offline access..."
-        python3 -m pip download archinstall pydantic pyparted -d "$PROFILE_DIR/airootfs/root/SENDUNE_wheels/" 2>/dev/null || true
-        
-        rm -rf "$WHEEL_DIR"
-        cd - >/dev/null
-    fi
-
-    # Create installer launcher script
-    info "Creating sendune-installer command..."
-    mkdir -p "$PROFILE_DIR/airootfs/usr/local/bin"
-
-    if [ -f "$INSTALLER_DIR/setup.py" ] || [ -f "$INSTALLER_DIR/pyproject.toml" ]; then
-        cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer" <<'INSTALLER_SCRIPT'
+    cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer" <<'EOF'
 #!/bin/bash
-# SENDUNE Installer Wrapper
-set -e
+set -euo pipefail
 
-# Core check
-if ! command -v python3 &>/dev/null; then
-    echo "ERROR: python3 not found. Cannot start installer." >&2
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "python3 is required to run SENDUNE." >&2
     exit 1
 fi
 
-# Ensure site-packages is in path
-export PYTHONPATH=$PYTHONPATH:/usr/lib/python$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')/site-packages
+export PYTHONPATH="/root${PYTHONPATH:+:$PYTHONPATH}"
+cd /root
 
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "⚠ archinstall module missing, attempting local wheel install..."
-    if [ -d /root/SENDUNE_wheels ]; then
-        pip install --no-index --find-links=/root/SENDUNE_wheels archinstall pydantic pyparted 2>/dev/null || true
-    fi
-fi
-
-# Final check
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "ERROR: archinstall module not found." >&2
-    exit 1
-fi
-
-# Run the installer
-if command -v senduneinstaller &>/dev/null; then
-    senduneinstaller "$@"
+if python3 -c "import SENDUNE_installer" >/dev/null 2>&1; then
+    exec python3 -m SENDUNE_installer "$@"
 else
-    cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
-fi
-INSTALLER_SCRIPT
-    else
-        cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer" <<'SIMPLE_SCRIPT'
-#!/bin/bash
-set -e
-if ! python3 -c "import archinstall" &>/dev/null; then
-    echo "ERROR: archinstall module missing." >&2
+    echo "SENDUNE_installer module is missing from /root/SENDUNE_installer" >&2
     exit 1
 fi
-cd /root/SENDUNE_installer && python3 -m SENDUNE_installer "$@"
-SIMPLE_SCRIPT
-    fi
-
+EOF
     chmod +x "$PROFILE_DIR/airootfs/usr/local/bin/sendune-installer"
-    success "sendune-installer command created"
 
-    # Copy and process splash image from installer directory in live environment
-    WALLPAPER_PATH="$PROFILE_DIR/airootfs/root/SENDUNE_installer/assets/sendune_wallpaper.png"
-    if [ -f "$WALLPAPER_PATH" ]; then
-        info "Processing SENDUNE splash image for boot menu..."
-        mkdir -p "$PROFILE_DIR/syslinux"
+    cat > "$PROFILE_DIR/airootfs/usr/local/bin/sendune_installer" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+exec /usr/local/bin/sendune-installer "$@"
+EOF
+    chmod +x "$PROFILE_DIR/airootfs/usr/local/bin/sendune_installer"
 
-        # Check if ImageMagick is available
-        if command -v convert &> /dev/null; then
-            info "Converting image to syslinux format (640x480, 16 colors)..."
-            if convert "$WALLPAPER_PATH" -resize 640x480 -colors 16 "$PROFILE_DIR/syslinux/splash.png" 2>/dev/null; then
-                success "Image converted successfully"
-            else
-                warn "Conversion failed, copying original image"
-                cp "$WALLPAPER_PATH" "$PROFILE_DIR/syslinux/splash.png"
+    cat > "$PROFILE_DIR/airootfs/root/customize_airootfs.sh" <<'EOF'
+#!/bin/bash
+set -euo pipefail
+
+useradd -m -s /bin/bash aurbuilder || true
+echo 'aurbuilder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/aurbuilder
+chmod 440 /etc/sudoers.d/aurbuilder
+
+su - aurbuilder -c 'rm -rf ~/yay && git clone https://aur.archlinux.org/yay.git ~/yay'
+su - aurbuilder -c 'cd ~/yay && makepkg -si --noconfirm'
+
+rm -f /etc/sudoers.d/aurbuilder
+EOF
+    chmod +x "$PROFILE_DIR/airootfs/root/customize_airootfs.sh"
+
+    if [[ -f "$PROFILE_DIR/airootfs/root/SENDUNE_installer/assets/sendune_wallpaper.png" ]]; then
+        local wallpaper="$PROFILE_DIR/airootfs/root/SENDUNE_installer/assets/sendune_wallpaper.png"
+        local splash="$PROFILE_DIR/syslinux/splash.png"
+        if command -v convert >/dev/null 2>&1; then
+            info "Generating syslinux splash image..."
+            if ! convert "$wallpaper" -resize 640x480 -colors 16 "$splash" 2>/dev/null; then
+                warn "Image conversion failed; using the original wallpaper."
+                cp "$wallpaper" "$splash"
             fi
         else
-            warn "ImageMagick not found, copying image without conversion"
-            cp "$WALLPAPER_PATH" "$PROFILE_DIR/syslinux/splash.png"
+            warn "ImageMagick not found; using the original wallpaper."
+            cp "$wallpaper" "$splash"
         fi
 
-        # Verify splash image was created
-        if [ -f "$PROFILE_DIR/syslinux/splash.png" ]; then
-            local size=$(du -h "$PROFILE_DIR/syslinux/splash.png" | cut -f1)
-            success "Splash image ready: $size"
-            # Add background to syslinux config
+        if ! grep -q "MENU BACKGROUND splash.png" "$PROFILE_DIR/syslinux/archiso.cfg"; then
             sed -i '/MENU TITLE SENDUNE Live Environment/a MENU BACKGROUND splash.png' \
                 "$PROFILE_DIR/syslinux/archiso.cfg"
-        else
-            error "Failed to create splash.png"
         fi
     else
-        warn "sendune_wallpaper.png not found at: $WALLPAPER_PATH"
-        info "Boot menu will use default styling"
-        info "Make sure the file exists at: $INSTALLER_DIR/assets/sendune_wallpaper.png"
-    fi
-
-    # Build ISO
-    info "Building ISO with mkarchiso..."
-    sudo mkarchiso -v -w "$WORK_DIR" -o "$OUTPUT_DIR" "$PROFILE_DIR" \
-        || error "mkarchiso failed"
-
-    # Find and rename output ISO
-    BUILT_ISO=$(find "$OUTPUT_DIR" -name "*.iso" -type f -printf '%T@ %p\n' | sort -n | tail -1 | cut -d' ' -f2-)
-
-    if [ -n "$BUILT_ISO" ] && [ -f "$BUILT_ISO" ]; then
-        if [ "$BUILT_ISO" != "$OUTPUT_ISO" ]; then
-            mv "$BUILT_ISO" "$OUTPUT_ISO"
-        fi
-        success "ISO successfully built at: $OUTPUT_ISO"
-        info "ISO size: $(du -h "$OUTPUT_ISO" | cut -f1)"
-    else
-        error "ISO file not found after build"
-    fi
-
-    # Cleanup
-    if [ -n "$CLEAN" ]; then
-        info "Cleaning up work directories..."
-        rm -rf "$PROFILE_DIR" "$WORK_DIR"
+        warn "Wallpaper not found at assets/sendune_wallpaper.png; boot menu will use default background."
     fi
 }
 
-# ---------- MAIN EXECUTION ----------
-case "$OS_ID" in
-    arch|manjaro|endeavouros)
-        info "Running native Arch Linux build..."
-        build_native_arch
-        ;;
-    ubuntu|debian|fedora|centos|rhel|opensuse|*)
-        warn "Non-Arch Linux system detected. Using Docker for build..."
-        build_with_docker
-        ;;
-esac
+find_built_iso() {
+    find "$(dirname "$OUTPUT_ISO")" -maxdepth 1 -type f -name '*.iso' -printf '%T@ %p\n' \
+        | sort -n \
+        | tail -1 \
+        | cut -d' ' -f2-
+}
 
-success "Build complete! 🎉"
-success "Your SENDUNE ISO is ready to use!"
+move_final_iso() {
+    local built_iso="$1"
+    [[ -n "$built_iso" && -f "$built_iso" ]] || error "ISO file was not produced."
+
+    if [[ "$built_iso" != "$OUTPUT_ISO" ]]; then
+        mv -f "$built_iso" "$OUTPUT_ISO"
+    fi
+
+    success "ISO successfully built at: $OUTPUT_ISO"
+    info "ISO size: $(du -h "$OUTPUT_ISO" | awk '{print $1}')"
+}
+
+build_native_arch() {
+    info "Running native Arch build..."
+    command -v pacman >/dev/null 2>&1 || error "pacman is required for native Arch builds."
+
+    sudo pacman -Syu --needed --noconfirm archiso git imagemagick || error "Failed to install native build dependencies."
+
+    prepare_build_root
+    write_common_profile
+
+    rm -f "$(dirname "$OUTPUT_ISO")"/*.iso
+
+    local mkarchiso_args=()
+    [[ "$VERBOSE" -eq 1 ]] && mkarchiso_args+=(-v)
+    mkarchiso_args+=(-w "$WORK_DIR" -o "$(dirname "$OUTPUT_ISO")" "$PROFILE_DIR")
+
+    info "Building ISO with mkarchiso..."
+    sudo mkarchiso "${mkarchiso_args[@]}"
+    move_final_iso "$(find_built_iso)"
+}
+
+build_with_docker() {
+    local docker
+    docker="$(docker_cmd)" || error "Docker is required. On WSL, make sure Docker Desktop WSL integration is enabled or the Docker daemon is running."
+
+    info "Running Docker-based build..."
+    if is_wsl; then
+        info "WSL detected; using Docker from inside WSL."
+    fi
+
+    prepare_build_root
+    write_common_profile
+
+    local docker_dir="${BUILD_ROOT}/docker"
+    local output_dir
+    output_dir="$(dirname "$OUTPUT_ISO")"
+
+    rm -rf "$docker_dir"
+    mkdir -p "$docker_dir" "$output_dir"
+    rm -f "$output_dir"/*.iso
+
+    cat > "$docker_dir/Dockerfile" <<'EOF'
+FROM archlinux:latest
+
+RUN pacman -Syu --noconfirm && \
+    pacman -S --noconfirm archiso git imagemagick && \
+    pacman -Scc --noconfirm
+
+WORKDIR /workdir
+CMD ["/bin/bash"]
+EOF
+
+    info "Building Docker image..."
+    eval "$docker build -t sendune-iso-builder \"$docker_dir\""
+
+    local container_work="${BUILD_ROOT}/docker-work"
+    mkdir -p "$container_work"
+
+    local mkarchiso_flags=""
+    [[ "$VERBOSE" -eq 1 ]] && mkarchiso_flags="-v"
+
+    info "Building ISO inside Docker..."
+    eval "$docker run --rm --privileged \
+        -v \"$PROFILE_DIR:/profile:ro\" \
+        -v \"$container_work:/work\" \
+        -v \"$output_dir:/output\" \
+        sendune-iso-builder \
+        bash -lc 'set -euo pipefail; mkarchiso $mkarchiso_flags -w /work -o /output /profile'"
+
+    move_final_iso "$(find_built_iso)"
+}
+
+main() {
+    parse_args "$@"
+
+    local os_id
+    os_id="$(detect_os)"
+    info "Detected OS: $os_id"
+
+    case "$os_id" in
+        arch|manjaro|endeavouros)
+            build_native_arch
+            ;;
+        *)
+            warn "Non-Arch environment detected; switching to Docker build."
+            build_with_docker
+            ;;
+    esac
+
+    success "Build complete."
+}
+
+main "$@"

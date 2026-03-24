@@ -36,6 +36,7 @@ class RGB3DLogo:
         ]
 
         self.top = top
+        self.content_top = 8
         self.speed = speed
         self.bold = bold
         
@@ -148,8 +149,18 @@ class RGB3DLogo:
         """Sets the terminal scroll region to start below the logo."""
         with self._lock:
             rows = shutil.get_terminal_size((80, 24)).lines
+            self.content_top = top
             sys.stdout.write(f"\033[{top};{rows}r")
             sys.stdout.write(f"\033[{top};1H")
+            sys.stdout.flush()
+
+    def clear_content_area(self):
+        """Clears everything below the logo while keeping the logo visible."""
+        with self._lock:
+            rows = shutil.get_terminal_size((80, 24)).lines
+            for line in range(self.content_top, rows + 1):
+                sys.stdout.write(f"\033[{line};1H\033[2K")
+            sys.stdout.write(f"\033[{self.content_top};1H")
             sys.stdout.flush()
 
     def reset_scroll_region(self):
@@ -166,7 +177,17 @@ def input_with_pause(prompt, logo_animation):
         # Just use standard input() but ensure color is reset
         sys.stdout.write("\033[0m")
         sys.stdout.flush()
-        return input(prompt)
+        response = input(prompt)
+
+        cols = max(1, shutil.get_terminal_size((80, 24)).columns)
+        prompt_width = len(prompt) + len(response)
+        lines_to_clear = max(1, math.ceil(prompt_width / cols))
+
+        for _ in range(lines_to_clear):
+            sys.stdout.write("\033[1A\033[2K\r")
+        sys.stdout.flush()
+
+        return response
     finally:
         logo_animation.resume()
 

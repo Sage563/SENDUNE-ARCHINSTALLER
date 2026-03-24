@@ -48,6 +48,8 @@ doc = ["sphinx"]
 [project.scripts]
 # Main SENDUNE installer command - just type 'sendune' to run
 sendune = "SENDUNE_installer.full_installation:starting_Sendune"
+sendune_installer = "SENDUNE_installer.__main__:run_as_module"
+sendune-installer = "SENDUNE_installer.__main__:run_as_module"
 
 [tool.setuptools.dynamic]
 readme = {file = ["README.rst", "USAGE.rst"]}
