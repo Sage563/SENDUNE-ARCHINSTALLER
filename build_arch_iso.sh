@@ -482,7 +482,9 @@ build_with_docker() {
     cat > "$docker_dir/Dockerfile" <<'EOF'
 FROM archlinux:latest
 
-RUN pacman -Syu --noconfirm && \
+RUN pacman-key --init && \
+    pacman-key --populate archlinux && \
+    pacman -Syu --noconfirm && \
     pacman -S --noconfirm archiso git imagemagick && \
     pacman -Scc --noconfirm
 
@@ -493,7 +495,7 @@ EOF
     info "Building Docker image..."
     eval "$docker build -t sendune-iso-builder \"$docker_dir\""
 
-    local container_work="${BUILD_ROOT}/docker-work"
+    local container_work="${SCRIPT_DIR}/docker-work"
     mkdir -p "$container_work"
 
     local mkarchiso_flags=""
