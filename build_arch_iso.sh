@@ -386,14 +386,7 @@ EOF
 #!/bin/bash
 set -euo pipefail
 
-useradd -m -s /bin/bash aurbuilder || true
-echo 'aurbuilder ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/aurbuilder
-chmod 440 /etc/sudoers.d/aurbuilder
-
-su - aurbuilder -c 'rm -rf ~/yay && git clone https://aur.archlinux.org/yay.git ~/yay'
-su - aurbuilder -c 'cd ~/yay && makepkg -si --noconfirm'
-
-rm -f /etc/sudoers.d/aurbuilder
+locale-gen
 EOF
     chmod +x "$PROFILE_DIR/airootfs/root/customize_airootfs.sh"
 
