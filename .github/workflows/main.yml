@@ -1,0 +1,32 @@
+name: Build and Upload Arch ISO
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y archiso docker # Ensure build tools are present
+
+      - name: Build ISO
+        run: |
+          # Ensure the script is executable
+          chmod +x build_arch_iso.sh
+          # Run the build command
+          sudo ./build_arch_iso.sh SENDUNE_installer -o ./out-iso/sendune.iso --clean -v -n Sendune
+
+      - name: Upload ISO Artifact
+        uses: [actions/upload-artifact](https://github.com)@v4
+        with:
+          name: Sendune-ISO
+          path: ./out-iso/sendune.iso
+          if-no-files-found: error
